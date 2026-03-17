@@ -1,0 +1,1 @@
+# tf-aws-module_collection-eventbridge
