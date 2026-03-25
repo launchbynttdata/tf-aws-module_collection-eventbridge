@@ -43,6 +43,10 @@ JOB_EMAIL ?= job@job.job
 
 COMPONENTS_DIR = components
 
+# golangci-lint: components invoke `golangci-lint run ... --timeout $(GO_LINT_TIMEOUT)`; CLI wins over .golangci.yaml run.timeout.
+# Set before -include so this overrides the 5m default in components/module/tasks/golang/Makefile. Override per run: make lint GO_LINT_TIMEOUT=15m
+GO_LINT_TIMEOUT ?= 10m
+
 # Terraform init for roots that use private registry modules (tflint/terraform need .terraform/modules).
 TERRAFORM_INIT_DIRS ?= . $(wildcard examples/*/) tests/review_plan
 
