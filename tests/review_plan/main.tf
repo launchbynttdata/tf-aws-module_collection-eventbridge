@@ -18,3 +18,7 @@ module "collection" {
   api_destinations  = var.api_destinations
   advanced_config   = var.advanced_config
 }
+
+provider "aws" {
+  region = var.aws_region
+}
