@@ -152,6 +152,16 @@ variable "rules" {
     ]))
     error_message = "service_specific_overrides is not supported by this module yet; omit it or leave it null."
   }
+
+  validation {
+    condition = alltrue(flatten([
+      for r in var.rules : [
+        for t in r.targets :
+        !coalesce(t.create_role, false) || (try(t.role_arn, null) == null || try(t.role_arn, "") == "")
+      ]
+    ]))
+    error_message = "When a rule target sets create_role = true, omit role_arn so the module can create the role. When create_role = false, role_arn is optional (omit for targets that use resource policies only, e.g. SNS)."
+  }
 }
 
 variable "archives" {

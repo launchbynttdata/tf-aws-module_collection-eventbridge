@@ -23,6 +23,15 @@ locals {
   rule_names    = [for r in var.rules : r.name]
   rule_names_ok = length(local.rule_names) == length(distinct(local.rule_names))
 
+  archive_names    = [for a in var.archives : a.name]
+  archive_names_ok = length(local.archive_names) == length(distinct(local.archive_names))
+
+  schedule_names    = [for s in var.schedules : s.name]
+  schedule_names_ok = length(local.schedule_names) == length(distinct(local.schedule_names))
+
+  pipe_names    = [for p in var.pipes : p.name]
+  pipe_names_ok = length(local.pipe_names) == length(distinct(local.pipe_names))
+
   rules_by_name = { for r in var.rules : r.name => r }
 
   rule_target_entries = flatten([
