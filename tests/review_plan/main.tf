@@ -19,6 +19,9 @@ module "collection" {
   advanced_config   = var.advanced_config
 }
 
+// This provider is added here to support the non-standard test configuration for these review plan tests.
+// The functional tests use the default provider configuration, but the review plan tests need to set the region
+// explicitly.
 provider "aws" {
   region = var.aws_region
 }
