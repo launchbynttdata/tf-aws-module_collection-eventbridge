@@ -12,8 +12,8 @@ output "bus_arn" {
 }
 
 output "rule_names" {
-  description = "Rule names in input order."
-  value       = [for r in var.rules : r.name]
+  description = "Deployed EventBridge rule names (prefixed), in the same order as var.rules."
+  value       = [for r in var.rules : module.event_rule[r.name].name]
 }
 
 output "rule_arns" {

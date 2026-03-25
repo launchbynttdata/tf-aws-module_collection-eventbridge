@@ -88,6 +88,13 @@ variable "required_tag_keys" {
   description = "If non-empty, every key listed here must exist in tags."
   type        = list(string)
   default     = []
+
+  validation {
+    condition = alltrue([
+      for k in var.required_tag_keys : contains(keys(var.tags), k)
+    ])
+    error_message = "All required_tag_keys must be present in tags."
+  }
 }
 
 variable "bus" {
@@ -162,23 +169,58 @@ variable "rules" {
     ]))
     error_message = "When a rule target sets create_role = true, omit role_arn so the module can create the role. When create_role = false, role_arn is optional (omit for targets that use resource policies only, e.g. SNS)."
   }
+
+  validation {
+    condition     = length([for r in var.rules : r.name]) == length(distinct([for r in var.rules : r.name]))
+    error_message = "rules[*].name values must be unique."
+  }
+
+  validation {
+    condition = alltrue([
+      for r in var.rules : can(jsondecode(r.event_pattern_json))
+    ])
+    error_message = "Each rules[*].event_pattern_json must be valid JSON."
+  }
+
+  validation {
+    condition     = alltrue([for r in var.rules : length(r.targets) > 0])
+    error_message = "Each rule must declare at least one target in rules[*].targets."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for r in var.rules : [
+        for t in r.targets :
+        !coalesce(t.create_role, false) || contains(
+          ["sqs", "lambda", "sns", "stepfunctions", "sfn", "firehose", "events", "eventbus", "events_api_destination", "api_destination"],
+          lower(t.type)
+        )
+      ]
+    ]))
+    error_message = "When create_role is true, rule target type must be one of: sqs, lambda, sns, stepfunctions, sfn, firehose, events, eventbus, events_api_destination, api_destination."
+  }
 }
 
 variable "archives" {
-  description = "Event archives on the effective event bus."
+  description = "Event archives on the effective event bus. KMS encryption on archives is not supported until the cloudwatch_event_archive primitive exposes a KMS argument."
   type = list(object({
     name               = string
     event_pattern_json = optional(string)
     retention_days     = optional(number)
-    kms_key_arn        = optional(string)
   }))
   default = []
 
   validation {
+    condition     = length([for a in var.archives : a.name]) == length(distinct([for a in var.archives : a.name]))
+    error_message = "archives[*].name values must be unique."
+  }
+
+  validation {
     condition = alltrue([
-      for a in var.archives : try(a.kms_key_arn, null) == null || try(a.kms_key_arn, "") == ""
+      for a in var.archives :
+      try(a.event_pattern_json, null) == null || a.event_pattern_json == "" ? true : can(jsondecode(a.event_pattern_json))
     ])
-    error_message = "archives.kms_key_arn is not supported until the cloudwatch_event_archive primitive exposes a KMS argument; remove kms_key_arn or leave it unset."
+    error_message = "When set, archives[*].event_pattern_json must be valid JSON."
   }
 }
 
@@ -234,6 +276,28 @@ variable "schedules" {
     ])
     error_message = "Every schedules[*].group_name other than the built-in \"default\" must match a schedule_groups[*].name value."
   }
+
+  validation {
+    condition     = length([for s in var.schedules : s.name]) == length(distinct([for s in var.schedules : s.name]))
+    error_message = "schedules[*].name values must be unique."
+  }
+
+  validation {
+    condition = alltrue([
+      for s in var.schedules :
+      !coalesce(s.create_role, false) || (
+        startswith(s.target_arn, "arn:aws:lambda:") ||
+        startswith(s.target_arn, "arn:aws:sqs:") ||
+        startswith(s.target_arn, "arn:aws:sns:") ||
+        startswith(s.target_arn, "arn:aws:states:") ||
+        startswith(s.target_arn, "arn:aws:events:") ||
+        startswith(s.target_arn, "arn:aws:firehose:") ||
+        startswith(s.target_arn, "arn:aws:ecs:") ||
+        startswith(s.target_arn, "arn:aws:codebuild:")
+      )
+    ])
+    error_message = "When schedules[*].create_role is true, target_arn must be a supported Scheduler target (Lambda, SQS, SNS, Step Functions, EventBridge, Firehose, ECS, CodeBuild)."
+  }
 }
 
 variable "pipes" {
@@ -263,10 +327,59 @@ variable "pipes" {
     ])
     error_message = "Each pipe must either set create_role = true (and omit role_arn) or set create_role = false with a non-empty role_arn."
   }
+
+  validation {
+    condition     = length([for p in var.pipes : p.name]) == length(distinct([for p in var.pipes : p.name]))
+    error_message = "pipes[*].name values must be unique."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.pipes :
+      !coalesce(p.create_role, false) || (
+        startswith(p.source_arn, "arn:aws:sqs:") ||
+        startswith(p.source_arn, "arn:aws:dynamodb:") ||
+        startswith(p.source_arn, "arn:aws:kinesis:")
+      )
+    ])
+    error_message = "When pipes[*].create_role is true, source_arn must be SQS, DynamoDB stream, or Kinesis (supported pipe sources for generated IAM)."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.pipes :
+      !coalesce(p.create_role, false) || (
+        startswith(p.target_arn, "arn:aws:sqs:") ||
+        startswith(p.target_arn, "arn:aws:sns:") ||
+        startswith(p.target_arn, "arn:aws:lambda:") ||
+        startswith(p.target_arn, "arn:aws:states:") ||
+        startswith(p.target_arn, "arn:aws:firehose:") ||
+        startswith(p.target_arn, "arn:aws:execute-api:") ||
+        startswith(p.target_arn, "arn:aws:events:")
+      )
+    ])
+    error_message = "When pipes[*].create_role is true, target_arn must be a supported pipe target (SQS, SNS, Lambda, Step Functions, Firehose, API Gateway, or EventBridge)."
+  }
+
+  validation {
+    # coalesce() rejects empty strings; use explicit null/empty checks and a ternary so startswith/regex never see null.
+    condition = alltrue([
+      for p in var.pipes :
+      !coalesce(p.create_role, false) || (
+        try(p.enrichment_arn, null) == null || try(p.enrichment_arn, null) == "" ? true : (
+          startswith(p.enrichment_arn, "arn:aws:lambda:") ||
+          startswith(p.enrichment_arn, "arn:aws:execute-api:") ||
+          can(regex("^arn:aws:events:[^:]+:[^:]+:api-destination/", p.enrichment_arn)) ||
+          startswith(p.enrichment_arn, "arn:aws:states:")
+        )
+      )
+    ])
+    error_message = "When pipes[*].create_role is true and enrichment_arn is set, enrichment must be Lambda, API Gateway (execute-api), EventBridge API destination, or Step Functions."
+  }
 }
 
 variable "api_destinations" {
-  description = "API destinations (connection + destination)."
+  description = "API destinations (connection + destination). When rate_limit_per_second is null, the module uses 300 invocations per second (AWS default-style cap)."
   type = list(object({
     connection_name       = string
     authorization_type    = string
@@ -285,6 +398,16 @@ variable "api_destinations" {
       ])) <= 1
     ])
     error_message = "All api_destinations entries sharing a connection_name must use the same authorization_type and auth_parameters."
+  }
+
+  validation {
+    condition = alltrue([
+      for a in var.api_destinations :
+      try(a.auth_parameters.oauth, null) != null ||
+      try(a.auth_parameters.basic, null) != null ||
+      try(a.auth_parameters.api_key, null) != null
+    ])
+    error_message = "Each api_destinations[*].auth_parameters must include oauth, basic, or api_key."
   }
 }
 

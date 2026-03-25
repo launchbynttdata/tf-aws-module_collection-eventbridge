@@ -53,13 +53,16 @@ locals {
       {
         SchedulerInvokeTarget = {
           sid = "SchedulerInvokeTarget"
-          actions = compact([
-            startswith(v.target_arn, "arn:aws:lambda:") ? "lambda:InvokeFunction" : null,
-            startswith(v.target_arn, "arn:aws:sqs:") ? "sqs:SendMessage" : null,
-            startswith(v.target_arn, "arn:aws:sns:") ? "sns:Publish" : null,
-            startswith(v.target_arn, "arn:aws:states:") ? "states:StartExecution" : null,
-            startswith(v.target_arn, "arn:aws:events:") ? "events:PutEvents" : null,
-          ])
+          actions = compact(concat(
+            startswith(v.target_arn, "arn:aws:lambda:") ? ["lambda:InvokeFunction"] : [],
+            startswith(v.target_arn, "arn:aws:sqs:") ? ["sqs:SendMessage"] : [],
+            startswith(v.target_arn, "arn:aws:sns:") ? ["sns:Publish"] : [],
+            startswith(v.target_arn, "arn:aws:states:") ? ["states:StartExecution"] : [],
+            startswith(v.target_arn, "arn:aws:events:") ? ["events:PutEvents"] : [],
+            startswith(v.target_arn, "arn:aws:firehose:") ? ["firehose:PutRecord", "firehose:PutRecordBatch"] : [],
+            startswith(v.target_arn, "arn:aws:ecs:") ? ["ecs:RunTask"] : [],
+            startswith(v.target_arn, "arn:aws:codebuild:") ? ["codebuild:StartBuild"] : [],
+          ))
           resources = [v.target_arn]
         }
       },
@@ -75,6 +78,23 @@ locals {
 
   # Tie inline IAM policy names to the generated event bus name so separate module instances do not collide in one account.
   iam_inline_policy_token = substr(sha256(module.resource_names["event_bus"].standard), 0, 16)
+
+  pipe_enrichment_actions = {
+    for k, v in local.pipes_needing_role : k => compact(concat(
+      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
+        startswith(v.enrichment_arn, "arn:aws:lambda:") ? ["lambda:InvokeFunction"] : []
+      ),
+      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
+        startswith(v.enrichment_arn, "arn:aws:execute-api:") ? ["execute-api:Invoke"] : []
+      ),
+      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
+        can(regex("^arn:aws:events:[^:]+:[^:]+:api-destination/", v.enrichment_arn)) ? ["events:InvokeApiDestination"] : []
+      ),
+      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
+        startswith(v.enrichment_arn, "arn:aws:states:") ? ["states:StartSyncExecution", "states:StartExecution"] : []
+      ),
+    ))
+  }
 
   pipe_policy_statements = {
     for k, v in local.pipes_needing_role : k => merge(
@@ -94,16 +114,19 @@ locals {
             startswith(v.target_arn, "arn:aws:sqs:") ? ["sqs:SendMessage"] : [],
             startswith(v.target_arn, "arn:aws:sns:") ? ["sns:Publish"] : [],
             startswith(v.target_arn, "arn:aws:lambda:") ? ["lambda:InvokeFunction"] : [],
-            startswith(v.target_arn, "arn:aws:events:") ? ["events:PutEvents"] : [],
+            startswith(v.target_arn, "arn:aws:events:") && !can(regex("^arn:aws:events:[^:]+:[^:]+:api-destination/", v.target_arn)) ? ["events:PutEvents"] : [],
+            can(regex("^arn:aws:events:[^:]+:[^:]+:api-destination/", v.target_arn)) ? ["events:InvokeApiDestination"] : [],
             startswith(v.target_arn, "arn:aws:states:") ? ["states:StartExecution"] : [],
+            startswith(v.target_arn, "arn:aws:firehose:") ? ["firehose:PutRecord", "firehose:PutRecordBatch"] : [],
+            startswith(v.target_arn, "arn:aws:execute-api:") ? ["execute-api:Invoke"] : [],
           ))
           resources = [v.target_arn]
         }
       },
-      try(v.enrichment_arn, null) != null && v.enrichment_arn != "" ? {
+      try(v.enrichment_arn, null) != null && v.enrichment_arn != "" && length(local.pipe_enrichment_actions[k]) > 0 ? {
         PipeInvokeEnrichment = {
           sid       = "PipeInvokeEnrichment"
-          actions   = ["lambda:InvokeFunction"]
+          actions   = local.pipe_enrichment_actions[k]
           resources = [v.enrichment_arn]
         }
       } : {},
@@ -132,6 +155,18 @@ module "iam_role_event_target" {
       type        = "Service"
       identifiers = ["events.amazonaws.com"]
     }]
+    conditions = [
+      {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      },
+      {
+        test     = "ArnEquals"
+        variable = "aws:SourceArn"
+        values   = ["arn:aws:events:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:rule/${local.effective_event_bus_name}/${local.event_rule_full_names[regex("^([^:]+):(.+)$", each.key)[0]]}"]
+      }
+    ]
   }]
 }
 
@@ -162,12 +197,21 @@ module "iam_role_scheduler" {
   name_prefix = "${substr(replace(each.key, ":", "-"), 0, 32)}-sch-"
   tags        = local.merged_tags
 
+  # SourceAccount only: CreateSchedule validates assume-role before the schedule exists; a strict
+  # schedule-level aws:SourceArn match often fails that check. See AWS Scheduler execution role docs.
   assume_role_policy = [{
     actions = ["sts:AssumeRole"]
     principals = [{
       type        = "Service"
       identifiers = ["scheduler.amazonaws.com"]
     }]
+    conditions = [
+      {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      },
+    ]
   }]
 }
 
@@ -204,6 +248,18 @@ module "iam_role_pipe" {
       type        = "Service"
       identifiers = ["pipes.amazonaws.com"]
     }]
+    conditions = [
+      {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      },
+      {
+        test     = "ArnEquals"
+        variable = "aws:SourceArn"
+        values   = ["arn:aws:pipes:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:pipe/${local.pipes_pipe_full_names[each.key]}"]
+      }
+    ]
   }]
 }
 

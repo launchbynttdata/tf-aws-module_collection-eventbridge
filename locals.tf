@@ -10,29 +10,29 @@ locals {
     null
   )
 
-  existing_bus_lookup_name = var.bus.create ? null : coalesce(
+  existing_bus_lookup_name = var.bus.create ? null : try(coalesce(
     try(var.bus.existing_bus_name, null) != "" ? var.bus.existing_bus_name : null,
     local.bus_name_from_arn
-  )
+  ), null)
 
   generated_bus_name = coalesce(
     try(var.bus.name, null),
     module.resource_names["event_bus"].standard
   )
 
-  rule_names    = [for r in var.rules : r.name]
-  rule_names_ok = length(local.rule_names) == length(distinct(local.rule_names))
-
-  archive_names    = [for a in var.archives : a.name]
-  archive_names_ok = length(local.archive_names) == length(distinct(local.archive_names))
-
-  schedule_names    = [for s in var.schedules : s.name]
-  schedule_names_ok = length(local.schedule_names) == length(distinct(local.schedule_names))
-
-  pipe_names    = [for p in var.pipes : p.name]
-  pipe_names_ok = length(local.pipe_names) == length(distinct(local.pipe_names))
-
   rules_by_name = { for r in var.rules : r.name => r }
+
+  event_rule_full_names = {
+    for k, _ in local.rules_by_name : k => (
+      length("${module.resource_names["event_rule"].standard}-${k}") <= 64 ?
+      "${module.resource_names["event_rule"].standard}-${k}" :
+      (
+        64 - length(k) - 1 >= 1 ?
+        "${substr(module.resource_names["event_rule"].standard, 0, 64 - length(k) - 1)}-${k}" :
+        substr(sha256("${module.resource_names["event_rule"].standard}-${k}"), 0, 64)
+      )
+    )
+  }
 
   rule_target_entries = flatten([
     for rule_name, rule in local.rules_by_name : [

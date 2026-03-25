@@ -25,7 +25,7 @@ locals {
         oauth                      = null
         invocation_http_parameters = try(v.auth_parameters.invocation_http_parameters, null)
         } : {
-        api_key                    = v.auth_parameters.api_key
+        api_key                    = try(v.auth_parameters.api_key, null)
         basic                      = null
         oauth                      = null
         invocation_http_parameters = try(v.auth_parameters.invocation_http_parameters, null)

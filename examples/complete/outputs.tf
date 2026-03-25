@@ -36,11 +36,13 @@ output "e2e_sink_queue_url" {
 }
 
 output "integration_event_source" {
-  value = "collection.example"
+  value       = local.example_event_source
+  description = "Event source string used by integration rules and Terratest PutEvents (matches module rule patterns)."
 }
 
 output "integration_detail_type" {
-  value = "example.Detail"
+  value       = local.example_detail_type
+  description = "Detail-type used by the integration rule pattern (audit rule matches on source only)."
 }
 
 output "scheduler_iam_role_names" {

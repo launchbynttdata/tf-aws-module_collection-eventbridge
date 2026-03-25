@@ -26,9 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// awsTestRegion is set from Terraform output aws_region before SDK calls so API clients match the stack region.
-var awsTestRegion string
-
 func TestComposableComplete(t *testing.T, ctx ttctx.TestContext) {
 	TestComposableCompleteReadOnly(t, ctx)
 
@@ -37,7 +34,7 @@ func TestComposableComplete(t *testing.T, ctx ttctx.TestContext) {
 		detailType := terraform.Output(t, ctx.TerratestTerraformOptions(), "integration_detail_type")
 		busName := terraform.Output(t, ctx.TerratestTerraformOptions(), "bus_name")
 
-		eb := eventbridge.NewFromConfig(awsCfg(t))
+		eb := eventbridge.NewFromConfig(awsCfg(t, ctx))
 		out, err := eb.PutEvents(context.TODO(), &eventbridge.PutEventsInput{
 			Entries: []ebtypes.PutEventsRequestEntry{
 				{
@@ -65,10 +62,10 @@ func TestComposableComplete(t *testing.T, ctx ttctx.TestContext) {
 		marker := hex.EncodeToString(markerBytes)
 		detailJSON := `{"msg":"terratest-e2e","marker":"` + marker + `"}`
 
-		sqsClient := sqs.NewFromConfig(awsCfg(t))
+		sqsClient := sqs.NewFromConfig(awsCfg(t, ctx))
 		drainSqsQueue(t, sqsClient, sinkURL)
 
-		eb := eventbridge.NewFromConfig(awsCfg(t))
+		eb := eventbridge.NewFromConfig(awsCfg(t, ctx))
 		putOut, err := eb.PutEvents(context.TODO(), &eventbridge.PutEventsInput{
 			Entries: []ebtypes.PutEventsRequestEntry{
 				{
@@ -91,7 +88,7 @@ func TestComposableComplete(t *testing.T, ctx ttctx.TestContext) {
 
 	t.Run("SendSqsMatchingPipeFilter", func(t *testing.T) {
 		queueURL := terraform.Output(t, ctx.TerratestTerraformOptions(), "sqs_pipe_source_queue_url")
-		sqsClient := sqs.NewFromConfig(awsCfg(t))
+		sqsClient := sqs.NewFromConfig(awsCfg(t, ctx))
 		_, err := sqsClient.SendMessage(context.TODO(), &sqs.SendMessageInput{
 			QueueUrl:    aws.String(queueURL),
 			MessageBody: aws.String(`{"pipe":{"test":"terratest"}}`),
@@ -101,11 +98,6 @@ func TestComposableComplete(t *testing.T, ctx ttctx.TestContext) {
 }
 
 func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
-	region := terraform.Output(t, ctx.TerratestTerraformOptions(), "aws_region")
-	require.NotEmpty(t, region)
-	awsTestRegion = region
-	t.Cleanup(func() { awsTestRegion = "" })
-
 	busName := terraform.Output(t, ctx.TerratestTerraformOptions(), "bus_name")
 	busArn := terraform.Output(t, ctx.TerratestTerraformOptions(), "bus_arn")
 	topicArn := terraform.Output(t, ctx.TerratestTerraformOptions(), "sns_topic_arn")
@@ -113,7 +105,7 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 	detailType := terraform.Output(t, ctx.TerratestTerraformOptions(), "integration_detail_type")
 
 	t.Run("EventBus", func(t *testing.T) {
-		eb := eventbridge.NewFromConfig(awsCfg(t))
+		eb := eventbridge.NewFromConfig(awsCfg(t, ctx))
 		out, err := eb.DescribeEventBus(context.TODO(), &eventbridge.DescribeEventBusInput{Name: aws.String(busName)})
 		require.NoError(t, err)
 		assert.Equal(t, busArn, aws.ToString(out.Arn))
@@ -124,7 +116,8 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 		ruleNames := terraform.OutputList(t, ctx.TerratestTerraformOptions(), "rule_names")
 		require.GreaterOrEqual(t, len(ruleNames), 2, "expect built-in integration + audit rules")
 
-		eb := eventbridge.NewFromConfig(awsCfg(t))
+		eb := eventbridge.NewFromConfig(awsCfg(t, ctx))
+		var sawDetailTypeConstraint bool
 		for _, ruleName := range ruleNames {
 			desc, err := eb.DescribeRule(context.TODO(), &eventbridge.DescribeRuleInput{
 				EventBusName: aws.String(busName),
@@ -139,8 +132,9 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 			var m map[string]any
 			require.NoError(t, json.Unmarshal([]byte(pat), &m))
 			assert.Equal(t, []any{src}, m["source"])
-			if ruleName == ruleNames[0] {
-				assert.Equal(t, []any{detailType}, m["detail-type"])
+			if dt, ok := m["detail-type"]; ok {
+				assert.Equal(t, []any{detailType}, dt)
+				sawDetailTypeConstraint = true
 			}
 
 			tgts, err := eb.ListTargetsByRule(context.TODO(), &eventbridge.ListTargetsByRuleInput{
@@ -151,10 +145,11 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 			require.NotEmpty(t, tgts.Targets)
 			assert.Equal(t, topicArn, aws.ToString(tgts.Targets[0].Arn))
 		}
+		require.True(t, sawDetailTypeConstraint, "expected at least one rule whose pattern constrains detail-type (integration rule)")
 	})
 
 	t.Run("SnsTopicTags", func(t *testing.T) {
-		rgta := resourcegroupstaggingapi.NewFromConfig(awsCfg(t))
+		rgta := resourcegroupstaggingapi.NewFromConfig(awsCfg(t, ctx))
 		out, err := rgta.GetResources(context.TODO(), &resourcegroupstaggingapi.GetResourcesInput{
 			ResourceARNList: []string{topicArn},
 		})
@@ -175,7 +170,7 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 	t.Run("SchedulerRoleAttachedPolicyNoStarResource", func(t *testing.T) {
 		rolesJSON := terraform.OutputMap(t, ctx.TerratestTerraformOptions(), "scheduler_iam_role_names")
 		require.GreaterOrEqual(t, len(rolesJSON), 2, "expect one role per schedule with create_role = true")
-		iamc := iam.NewFromConfig(awsCfg(t))
+		iamc := iam.NewFromConfig(awsCfg(t, ctx))
 		for _, roleName := range rolesJSON {
 			require.NotEmpty(t, roleName)
 			doc := getFirstAttachedPolicyDocument(t, iamc, roleName)
@@ -187,7 +182,7 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 		arns := terraform.OutputList(t, ctx.TerratestTerraformOptions(), "pipe_arns")
 		require.NotEmpty(t, arns)
 		pipeName := resourceSuffixFromArn(arns[0], "pipe/")
-		pc := pipes.NewFromConfig(awsCfg(t))
+		pc := pipes.NewFromConfig(awsCfg(t, ctx))
 		out, err := pc.DescribePipe(context.TODO(), &pipes.DescribePipeInput{Name: aws.String(pipeName)})
 		require.NoError(t, err)
 		assert.Equal(t, "RUNNING", string(out.CurrentState))
@@ -202,7 +197,7 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 	t.Run("SchedulesAndGroup", func(t *testing.T) {
 		arns := terraform.OutputList(t, ctx.TerratestTerraformOptions(), "schedule_arns")
 		require.GreaterOrEqual(t, len(arns), 2, "expect default-group rate schedule and custom-group cron schedule")
-		sc := scheduler.NewFromConfig(awsCfg(t))
+		sc := scheduler.NewFromConfig(awsCfg(t, ctx))
 		var sawRate, sawCron bool
 		var customGroup string
 		for _, arn := range arns {
@@ -237,7 +232,7 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 		archiveArns := terraform.OutputList(t, ctx.TerratestTerraformOptions(), "archive_arns")
 		require.NotEmpty(t, archiveArns)
 		archiveName := resourceSuffixFromArn(archiveArns[0], "archive/")
-		eb := eventbridge.NewFromConfig(awsCfg(t))
+		eb := eventbridge.NewFromConfig(awsCfg(t, ctx))
 		out, err := eb.DescribeArchive(context.TODO(), &eventbridge.DescribeArchiveInput{
 			ArchiveName: aws.String(archiveName),
 		})
@@ -254,7 +249,7 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 		arns := terraform.OutputList(t, ctx.TerratestTerraformOptions(), "api_destination_arns")
 		require.NotEmpty(t, arns)
 		destName := apiDestinationNameFromArn(arns[0])
-		eb := eventbridge.NewFromConfig(awsCfg(t))
+		eb := eventbridge.NewFromConfig(awsCfg(t, ctx))
 		out, err := eb.DescribeApiDestination(context.TODO(), &eventbridge.DescribeApiDestinationInput{
 			Name: aws.String(destName),
 		})
@@ -263,7 +258,7 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 	})
 
 	t.Run("SnsTopicAttributes", func(t *testing.T) {
-		snsc := sns.NewFromConfig(awsCfg(t))
+		snsc := sns.NewFromConfig(awsCfg(t, ctx))
 		out, err := snsc.GetTopicAttributes(context.TODO(), &sns.GetTopicAttributesInput{
 			TopicArn: aws.String(topicArn),
 		})
@@ -274,13 +269,19 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 
 func drainSqsQueue(t *testing.T, client *sqs.Client, queueURL string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
 	for i := 0; i < 100; i++ {
-		out, err := client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		if err := ctx.Err(); err != nil {
+			require.Fail(t, "drainSqsQueue exceeded context deadline", err.Error())
+		}
+		recvCtx, recvCancel := context.WithTimeout(ctx, 25*time.Second)
+		out, err := client.ReceiveMessage(recvCtx, &sqs.ReceiveMessageInput{
 			QueueUrl:            aws.String(queueURL),
 			MaxNumberOfMessages: 10,
 			WaitTimeSeconds:     2,
 		})
+		recvCancel()
 		require.NoError(t, err)
 		if len(out.Messages) == 0 {
 			return
@@ -383,13 +384,11 @@ func scheduleGroupAndNameFromArn(arn string) (group, name string) {
 	return "default", suffix
 }
 
-func awsCfg(t *testing.T) aws.Config {
+func awsCfg(t *testing.T, ctx ttctx.TestContext) aws.Config {
 	t.Helper()
-	var opts []func(*config.LoadOptions) error
-	if r := awsTestRegion; r != "" {
-		opts = append(opts, config.WithRegion(r))
-	}
-	cfg, err := config.LoadDefaultConfig(context.TODO(), opts...)
+	region := terraform.Output(t, ctx.TerratestTerraformOptions(), "aws_region")
+	require.NotEmpty(t, region)
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
 	require.NoError(t, err)
 	return cfg
 }

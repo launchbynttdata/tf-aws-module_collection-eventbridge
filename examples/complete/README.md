@@ -61,7 +61,7 @@ End-to-end bus checks (`PutEventsDeliversThroughBusToSnsE2E` in Terratest) use a
 |------|-------------|------|---------|:--------:|
 | <a name="input_advanced_config"></a> [advanced\_config](#input\_advanced\_config) | n/a | `any` | `null` | no |
 | <a name="input_api_destinations"></a> [api\_destinations](#input\_api\_destinations) | n/a | <pre>list(object({<br/>    connection_name       = string<br/>    authorization_type    = string<br/>    auth_parameters       = any<br/>    destination_name      = string<br/>    invocation_endpoint   = string<br/>    http_method           = string<br/>    rate_limit_per_second = optional(number)<br/>  }))</pre> | `[]` | no |
-| <a name="input_archives"></a> [archives](#input\_archives) | n/a | <pre>list(object({<br/>    name               = string<br/>    event_pattern_json = optional(string)<br/>    retention_days     = optional(number)<br/>    kms_key_arn        = optional(string)<br/>  }))</pre> | `[]` | no |
+| <a name="input_archives"></a> [archives](#input\_archives) | n/a | <pre>list(object({<br/>    name               = string<br/>    event_pattern_json = optional(string)<br/>    retention_days     = optional(number)<br/>  }))</pre> | `[]` | no |
 | <a name="input_bus"></a> [bus](#input\_bus) | n/a | <pre>object({<br/>    create            = bool<br/>    name              = optional(string)<br/>    existing_bus_name = optional(string)<br/>    existing_bus_arn  = optional(string)<br/>    policies          = optional(list(string), [])<br/>  })</pre> | n/a | yes |
 | <a name="input_class_env"></a> [class\_env](#input\_class\_env) | n/a | `string` | `"dev"` | no |
 | <a name="input_instance_env"></a> [instance\_env](#input\_instance\_env) | n/a | `number` | `0` | no |
@@ -89,8 +89,8 @@ End-to-end bus checks (`PutEventsDeliversThroughBusToSnsE2E` in Terratest) use a
 | <a name="output_bus_name"></a> [bus\_name](#output\_bus\_name) | n/a |
 | <a name="output_connection_arns"></a> [connection\_arns](#output\_connection\_arns) | n/a |
 | <a name="output_e2e_sink_queue_url"></a> [e2e\_sink\_queue\_url](#output\_e2e\_sink\_queue\_url) | SQS URL subscribed to the example SNS topic for PutEvents end-to-end tests. |
-| <a name="output_integration_detail_type"></a> [integration\_detail\_type](#output\_integration\_detail\_type) | n/a |
-| <a name="output_integration_event_source"></a> [integration\_event\_source](#output\_integration\_event\_source) | n/a |
+| <a name="output_integration_detail_type"></a> [integration\_detail\_type](#output\_integration\_detail\_type) | Detail-type used by the integration rule pattern (audit rule matches on source only). |
+| <a name="output_integration_event_source"></a> [integration\_event\_source](#output\_integration\_event\_source) | Event source string used by integration rules and Terratest PutEvents (matches module rule patterns). |
 | <a name="output_pipe_arns"></a> [pipe\_arns](#output\_pipe\_arns) | n/a |
 | <a name="output_pipe_iam_role_names"></a> [pipe\_iam\_role\_names](#output\_pipe\_iam\_role\_names) | n/a |
 | <a name="output_rule_arns"></a> [rule\_arns](#output\_rule\_arns) | n/a |

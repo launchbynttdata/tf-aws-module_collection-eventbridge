@@ -11,9 +11,18 @@ Terraform collection module for AWS EventBridge: custom or existing event buses,
 - **Tags:** `tags` is required (non-empty). Optional `required_tag_keys` enforces organizational keys.
 - **Example:** [`examples/complete`](examples/complete) (uses `test.tfvars` for Terratest).
 
+## Upgrading (breaking changes)
+
+- **Rule names:** Rules are created with the same naming prefix pattern as archives, pipes, and schedules (`resource_names["event_rule"]` + logical `rules[*].name`). The `rule_names` output returns those **deployed** AWS names (in input order), not the bare logical names. Update external references, metric filters, and Terratest expectations accordingly.
+- **`archives`:** The `kms_key_arn` argument was removed from the object type until the archive primitive supports KMS.
+- **`rules`:** Each rule must declare at least one target; duplicate logical rule names, invalid event patterns, and unsupported target types for generated IAM are rejected at plan time via variable validation.
+- **`bus.policies`:** Policy attachments use **`sha256(policy)`** as the `for_each` key so reordering the policy list does not destroy and recreate resources.
+
 ## IAM policies
 
-Roles created when `create_role = true` (EventBridge targets, Scheduler, Pipes) use **`module_primitive/iam_role`**, **`module_primitive/iam_policy`**, and **`module_primitive/iam_role_policy_attachment`** with trust policies scoped to the relevant service principal (`events.amazonaws.com`, `scheduler.amazonaws.com`, `pipes.amazonaws.com`). Permission statements use **specific resource ARNs** (targets, queues, topics, etc.). This module does **not** emit `Resource: "*"` in generated policies.
+Roles created when `create_role = true` (EventBridge targets, Scheduler, Pipes) use **`module_primitive/iam_role`**, **`module_primitive/iam_policy`**, and **`module_primitive/iam_role_policy_attachment`** with trust policies for the relevant service principal (`events.amazonaws.com`, `scheduler.amazonaws.com`, `pipes.amazonaws.com`). Trust policies always include **`aws:SourceAccount`**. **Scheduler** roles use **SourceAccount only** so `CreateSchedule` can validate assume-role (a schedule-scoped `aws:SourceArn` condition is often rejected before the schedule exists). **EventBridge rule targets** and **Pipes** also add **`aws:SourceArn`** for the specific rule or pipe ARN. Permission statements use **specific resource ARNs** (targets, queues, topics, etc.). This module does **not** emit `Resource: "*"` in generated policies.
+
+Scheduler, pipe, and rule-target IAM for `create_role = true` only covers **documented** target and enrichment ARN patterns; unsupported ARNs fail variable validation instead of producing empty policy actions.
 
 If a future change requires a wildcard `Resource` for a particular AWS action, that statement must be isolated, commented in Terraform with **why** it is required, and documented here with a link to the relevant **AWS documentation** (for example [IAM policy elements](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements.html) and the service’s permissions reference).
 
@@ -25,6 +34,7 @@ Connections and API destinations use **`module_primitive/cloudwatch_event_connec
 
 - `tests/post_deploy_functional` — deploy, SDK checks, `PutEvents` mutating test
 - `tests/post_deploy_functional_readonly` — `RunNonDestructiveTest`, read-only SDK checks only
+- `tests/review_plan` — plan-only regressions (schedule groups, pipe IAM, API destination naming, duplicate-name validation, Firehose scheduler IAM, stable bus policy keys)
 
 Configure AWS credentials and run from the repo root with `mise`/`asdf` Go and Terraform as appropriate.
 
@@ -80,8 +90,8 @@ Configure AWS credentials and run from the repo root with `mise`/`asdf` Go and T
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_advanced_config"></a> [advanced\_config](#input\_advanced\_config) | Reserved escape hatch for future passthrough of provider-native settings. Must not be used to bypass tagging or IAM controls. | `any` | `null` | no |
-| <a name="input_api_destinations"></a> [api\_destinations](#input\_api\_destinations) | API destinations (connection + destination). | <pre>list(object({<br/>    connection_name       = string<br/>    authorization_type    = string<br/>    auth_parameters       = any<br/>    destination_name      = string<br/>    invocation_endpoint   = string<br/>    http_method           = string<br/>    rate_limit_per_second = optional(number)<br/>  }))</pre> | `[]` | no |
-| <a name="input_archives"></a> [archives](#input\_archives) | Event archives on the effective event bus. | <pre>list(object({<br/>    name               = string<br/>    event_pattern_json = optional(string)<br/>    retention_days     = optional(number)<br/>    kms_key_arn        = optional(string)<br/>  }))</pre> | `[]` | no |
+| <a name="input_api_destinations"></a> [api\_destinations](#input\_api\_destinations) | API destinations (connection + destination). When rate\_limit\_per\_second is null, the module uses 300 invocations per second (AWS default-style cap). | <pre>list(object({<br/>    connection_name       = string<br/>    authorization_type    = string<br/>    auth_parameters       = any<br/>    destination_name      = string<br/>    invocation_endpoint   = string<br/>    http_method           = string<br/>    rate_limit_per_second = optional(number)<br/>  }))</pre> | `[]` | no |
+| <a name="input_archives"></a> [archives](#input\_archives) | Event archives on the effective event bus. KMS encryption on archives is not supported until the cloudwatch\_event\_archive primitive exposes a KMS argument. | <pre>list(object({<br/>    name               = string<br/>    event_pattern_json = optional(string)<br/>    retention_days     = optional(number)<br/>  }))</pre> | `[]` | no |
 | <a name="input_bus"></a> [bus](#input\_bus) | Event bus configuration: create a custom bus or use an existing bus. | <pre>object({<br/>    create            = bool<br/>    name              = optional(string)<br/>    existing_bus_name = optional(string)<br/>    existing_bus_arn  = optional(string)<br/>    policies          = optional(list(string), [])<br/>  })</pre> | n/a | yes |
 | <a name="input_class_env"></a> [class\_env](#input\_class\_env) | Environment class (e.g. dev, qa, prod) for resource naming. | `string` | `"dev"` | no |
 | <a name="input_instance_env"></a> [instance\_env](#input\_instance\_env) | Numeric instance of the environment for resource naming. | `number` | `0` | no |
@@ -110,7 +120,7 @@ Configure AWS credentials and run from the repo root with `mise`/`asdf` Go and T
 | <a name="output_pipe_arns"></a> [pipe\_arns](#output\_pipe\_arns) | Pipe ARNs sorted by pipe name. |
 | <a name="output_pipe_iam_role_names"></a> [pipe\_iam\_role\_names](#output\_pipe\_iam\_role\_names) | Names of IAM roles created for Pipes (create\_role = true). |
 | <a name="output_rule_arns"></a> [rule\_arns](#output\_rule\_arns) | Rule ARNs sorted by rule name for stable ordering. |
-| <a name="output_rule_names"></a> [rule\_names](#output\_rule\_names) | Rule names in input order. |
+| <a name="output_rule_names"></a> [rule\_names](#output\_rule\_names) | Deployed EventBridge rule names (prefixed), in the same order as var.rules. |
 | <a name="output_schedule_arns"></a> [schedule\_arns](#output\_schedule\_arns) | Schedule ARNs sorted by schedule name. |
 | <a name="output_scheduler_iam_role_names"></a> [scheduler\_iam\_role\_names](#output\_scheduler\_iam\_role\_names) | Names of IAM roles created for Scheduler targets (create\_role = true). |
 <!-- END_TF_DOCS -->

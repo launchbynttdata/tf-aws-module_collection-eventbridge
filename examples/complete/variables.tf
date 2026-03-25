@@ -114,7 +114,6 @@ variable "archives" {
     name               = string
     event_pattern_json = optional(string)
     retention_days     = optional(number)
-    kms_key_arn        = optional(string)
   }))
   default = []
 }

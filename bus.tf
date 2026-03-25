@@ -23,7 +23,7 @@ locals {
 module "event_bus_policy" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/cloudwatch_event_bus_policy/aws"
   version  = "~> 0.0"
-  for_each = length(coalesce(var.bus.policies, [])) > 0 ? { for i, p in var.bus.policies : tostring(i) => p } : {}
+  for_each = length(coalesce(var.bus.policies, [])) > 0 ? { for p in var.bus.policies : sha256(p) => p } : {}
 
   event_bus_name = local.effective_event_bus_name
   policy         = each.value

@@ -1,5 +1,7 @@
 # review_plan
 
+Plan-only fixture for module validation and planned-value assertions. Scenarios live under `scenarios/*.tfvars` (see `main_test.go`).
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
@@ -29,7 +31,7 @@ No resources.
 | <a name="input_advanced_config"></a> [advanced\_config](#input\_advanced\_config) | n/a | `any` | `null` | no |
 | <a name="input_api_destinations"></a> [api\_destinations](#input\_api\_destinations) | n/a | `any` | `[]` | no |
 | <a name="input_archives"></a> [archives](#input\_archives) | n/a | `any` | `[]` | no |
-| <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | Region for the AWS provider (tests pass -var from the SDK default chain). | `string` | n/a | yes |
+| <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | AWS region for the provider (Terratest sets this from the environment). | `string` | `"us-east-2"` | no |
 | <a name="input_bus"></a> [bus](#input\_bus) | n/a | `any` | <pre>{<br/>  "create": true,<br/>  "policies": []<br/>}</pre> | no |
 | <a name="input_pipes"></a> [pipes](#input\_pipes) | n/a | `any` | `[]` | no |
 | <a name="input_required_tag_keys"></a> [required\_tag\_keys](#input\_required\_tag\_keys) | n/a | `list(string)` | `[]` | no |

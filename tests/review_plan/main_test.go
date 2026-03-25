@@ -7,7 +7,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -20,9 +22,14 @@ import (
 
 const (
 	// Variable validation messages from variables.tf (2026-03-24 review follow-ups).
-	wantScheduleGroupErr = `schedules[*].group_name other than the built-in "default" must match`
-	wantPipeRoleErr      = "Each pipe must either set create_role"
+	wantScheduleGroupErr       = `schedules[*].group_name other than the built-in "default" must match`
+	wantPipeRoleErr            = "Each pipe must either set create_role"
+	wantDuplicateRuleNamesErr  = "rules[*].name values must be unique"
+	// Terraform CLI wraps error_message across lines between "supported" and "Scheduler target".
+	wantScheduleTargetClassErr = "When schedules[*].create_role is true, target_arn must be a supported"
 )
+
+var eventBusPolicyForEachKeyRe = regexp.MustCompile(`module\.collection\.module\.event_bus_policy\["([a-f0-9]{64})"\]`)
 
 func TestPlan_scheduleGroup_matchesDeclaredGroup(t *testing.T) {
 	opts := planOpts(t, "pass_schedule_group_match.tfvars")
@@ -67,6 +74,58 @@ func TestPlan_pipe_externalRoleMissingRoleArn_failsValidation(t *testing.T) {
 	_, err := terraform.InitAndPlanE(t, opts)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), wantPipeRoleErr)
+}
+
+func TestPlan_scheduler_firehoseCreateRole_policyIncludesFirehoseActions(t *testing.T) {
+	opts := planOpts(t, "pass_scheduler_firehose.tfvars")
+	plan := initPlanShowStructOrSkip(t, opts)
+	if plan == nil {
+		return
+	}
+	found := plannedIAMPolicyDocumentsContaining(plan, "firehose:PutRecord")
+	require.NotEmpty(t, found, "expected at least one planned IAM policy document to grant firehose:PutRecord for Firehose scheduler target")
+}
+
+func TestPlan_duplicateRuleNames_failsValidation(t *testing.T) {
+	opts := planOpts(t, "fail_duplicate_rule_names.tfvars")
+	_, err := terraform.InitAndPlanE(t, opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), wantDuplicateRuleNamesErr)
+}
+
+func TestPlan_scheduleUnsupportedTarget_failsValidation(t *testing.T) {
+	opts := planOpts(t, "fail_schedule_unsupported_target.tfvars")
+	_, err := terraform.InitAndPlanE(t, opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), wantScheduleTargetClassErr)
+}
+
+func TestPlan_busPolicy_forEachKeysAreContentHashes(t *testing.T) {
+	opts := planOpts(t, "pass_bus_policies_stable.tfvars")
+	plan := initPlanShowStructOrSkip(t, opts)
+	if plan == nil {
+		return
+	}
+	keys := plannedEventBusPolicyForEachKeys(plan)
+	require.Len(t, keys, 2, "expected two event bus policy module instances")
+	for _, k := range keys {
+		require.Regexp(t, "^[a-f0-9]{64}$", k, "for_each key should be sha256(policy) hex")
+	}
+}
+
+func TestTerraformValidate_fixtureSucceeds(t *testing.T) {
+	dir := fixtureDir(t)
+	opts := &terraform.Options{
+		TerraformDir: dir,
+		NoColor:      true,
+		Logger:       logger.Discard,
+		EnvVars: map[string]string{
+			"TF_IN_AUTOMATION": "true",
+			"TF_INPUT":         "0",
+		},
+	}
+	terraform.Init(t, opts)
+	terraform.Validate(t, opts)
 }
 
 func TestPlan_apiDestination_sameDestinationNameDistinctConnections_distinctPlannedNames(t *testing.T) {
@@ -232,6 +291,38 @@ func afterUnknownHasTrue(u interface{}, key string) bool {
 		}
 	}
 	return false
+}
+
+func plannedIAMPolicyDocumentsContaining(plan *terraform.PlanStruct, needle string) []string {
+	var out []string
+	for _, res := range plan.ResourcePlannedValuesMap {
+		if res.Type != "aws_iam_policy" {
+			continue
+		}
+		raw, ok := res.AttributeValues["policy"].(string)
+		if !ok || raw == "" {
+			continue
+		}
+		if strings.Contains(raw, needle) {
+			out = append(out, raw)
+		}
+	}
+	return out
+}
+
+func plannedEventBusPolicyForEachKeys(plan *terraform.PlanStruct) []string {
+	seen := map[string]bool{}
+	var keys []string
+	for addr := range plan.ResourceChangesMap {
+		m := eventBusPolicyForEachKeyRe.FindStringSubmatch(addr)
+		if len(m) < 2 || seen[m[1]] {
+			continue
+		}
+		seen[m[1]] = true
+		keys = append(keys, m[1])
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func plannedAPIDestinationNames(plan *terraform.PlanStruct) []string {

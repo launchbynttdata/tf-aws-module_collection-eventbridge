@@ -6,7 +6,7 @@ module "event_rule" {
   version  = "~> 0.0"
   for_each = local.rules_by_name
 
-  name           = each.value.name
+  name           = local.event_rule_full_names[each.key]
   description    = try(each.value.description, null)
   event_bus_name = local.effective_event_bus_name
   event_pattern  = each.value.event_pattern_json
