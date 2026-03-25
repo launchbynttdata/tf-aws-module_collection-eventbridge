@@ -122,3 +122,22 @@ endif
 clean:
 	-repo list | awk '{ print $1; }' | cut -d '/' -f1 | uniq | xargs rm -rf
 	find . -type l ! -exec test -e {} \; -print | xargs rm -rf
+
+# Ensure private registry modules are installed before lint/validate (tflint/terraform need .terraform/modules).
+# Hook tfmodule/init (not lint) because components define lint:: double-colon rules; mixing lint: and lint:: errors in GNU Make.
+# tfmodule/lint, tfmodule/plan, and tfmodule/create_example_providers already depend on tfmodule/init.
+TERRAFORM_INIT_DIRS ?= . $(wildcard examples/*/) tests/review_plan
+
+.PHONY: terraform-init-all
+terraform-init-all:
+	@set -e; \
+	for d in $(TERRAFORM_INIT_DIRS); do \
+	  if [ -f "$$d/versions.tf" ]; then \
+	    echo "terraform init in $$d"; \
+	    (cd "$$d" && terraform init -backend=false -input=false); \
+	  fi; \
+	done
+
+# Merge: components use lint:: / test:: (double-colon); hook tfmodule/init instead to avoid :/:: conflict.
+# tfmodule/lint and tfmodule/plan already depend on tfmodule/init.
+tfmodule/init: terraform-init-all
