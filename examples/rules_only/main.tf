@@ -78,7 +78,6 @@ module "eventbridge_collection" {
   schedule_groups  = {}
   pipes            = []
   api_destinations = []
-  advanced_config  = null
 
   depends_on = [module.sns_topic_policy]
 }

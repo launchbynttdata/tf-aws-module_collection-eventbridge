@@ -16,3 +16,8 @@ output "rule_names" {
 output "sns_topic_arn" {
   value = module.sns_topic.arn
 }
+
+output "required_tag_keys" {
+  description = "Pass-through from the collection module."
+  value       = module.eventbridge_collection.required_tag_keys
+}

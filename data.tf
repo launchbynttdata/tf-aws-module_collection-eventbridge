@@ -3,3 +3,8 @@
 
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
+
+data "aws_cloudwatch_event_bus" "existing" {
+  count = var.bus.create ? 0 : 1
+  name  = local.existing_bus_lookup_name
+}

@@ -326,7 +326,6 @@ module "eventbridge_collection" {
   schedule_groups         = merge(local.example_schedule_groups, var.schedule_groups)
   pipes                   = coalescelist(var.pipes, local.example_pipes)
   api_destinations        = coalescelist(var.api_destinations, local.example_api_destinations)
-  advanced_config         = var.advanced_config
 
   depends_on = [
     module.sns_topic_policy,

@@ -16,6 +16,8 @@ const (
 )
 
 func TestEventBridgeCollection(t *testing.T) {
+	testimpl.LogPostDeployFunctionalScope(t)
+
 	ctx := types.CreateTestContextBuilder().
 		SetTestConfig(&testimpl.ThisTFModuleConfig{}).
 		SetTestConfigFolderName(testConfigsExamplesFolderDefault).

@@ -13,6 +13,7 @@ Terraform collection module for AWS EventBridge: custom or existing event buses,
 
 ## Upgrading (breaking changes)
 
+- **`advanced_config`:** Removed. It was unused in resource logic; see [Future improvement: optional passthrough / escape hatches](#future-improvement-optional-passthrough--escape-hatches) for how to extend the module instead. Drop the argument and any outputs that referenced it.
 - **Rule names:** Rules are created with the same naming prefix pattern as archives, pipes, and schedules (`resource_names["event_rule"]` + logical `rules[*].name`). The `rule_names` output returns those **deployed** AWS names (in input order), not the bare logical names. Update external references, metric filters, and Terratest expectations accordingly.
 - **`archives`:** The `kms_key_arn` argument was removed from the object type until the archive primitive supports KMS.
 - **`rules`:** Each rule must declare at least one target; duplicate logical rule names, invalid event patterns, and unsupported target types for generated IAM are rejected at plan time via variable validation.
@@ -36,7 +37,26 @@ Connections and API destinations use **`module_primitive/cloudwatch_event_connec
 - `tests/post_deploy_functional_readonly` — `RunNonDestructiveTest`, read-only SDK checks only
 - `tests/review_plan` — plan-only regressions (schedule groups, pipe IAM, API destination naming, duplicate-name validation, Firehose scheduler IAM, stable bus policy keys)
 
+**CI vs local:** When `CI=true` (e.g. GitHub Actions), `post_deploy_functional` still runs **Terraform apply/destroy** and all SDK checks except the long **PutEvents→SNS→SQS sink** subtest (that subtest is skipped to avoid multi-minute SQS drain/long-poll in workflows). Run the full functional suite locally with AWS credentials:
+
+```bash
+go test -v -timeout 30m ./tests/post_deploy_functional/...
+go test -v -timeout 15m ./tests/post_deploy_functional_readonly/...   # requires examples/complete already applied
+```
+
+Local functional runs use verbose Terraform stdout logging and progress logs during the long SQS drain/long-poll step.
+
 Configure AWS credentials and run from the repo root with `mise`/`asdf` Go and Terraform as appropriate.
+
+## Future improvement: optional passthrough / escape hatches
+
+This module intentionally avoids a generic `any`-typed “advanced config” input: it implied behavior without implementing it, encouraged opaque merges that are hard to review, and complicated static analysis. If a real need appears—for example, wiring a new argument on a primitive before the collection’s typed object model catches up—a better path is:
+
+1. **Prefer explicit variables** on the collection module that map to documented primitive arguments, with validation and README notes.
+2. **If many optional knobs are needed**, introduce a **narrowly typed** `optional(object({ ... }))` per concern (e.g. scheduler-only overrides) rather than one global bag.
+3. **Last resort:** document any merge semantics, forbid bypassing tagging and IAM controls in module policy, and add review-plan or contract tests so passthrough cannot silently widen blast radius.
+
+Until then, callers should extend via separate resources or upstream module changes rather than an unused placeholder variable.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -89,7 +109,6 @@ Configure AWS credentials and run from the repo root with `mise`/`asdf` Go and T
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_advanced_config"></a> [advanced\_config](#input\_advanced\_config) | Reserved escape hatch for future passthrough of provider-native settings. Must not be used to bypass tagging or IAM controls. | `any` | `null` | no |
 | <a name="input_api_destinations"></a> [api\_destinations](#input\_api\_destinations) | API destinations (connection + destination). When rate\_limit\_per\_second is null, the module uses 300 invocations per second (AWS default-style cap). | <pre>list(object({<br/>    connection_name       = string<br/>    authorization_type    = string<br/>    auth_parameters       = any<br/>    destination_name      = string<br/>    invocation_endpoint   = string<br/>    http_method           = string<br/>    rate_limit_per_second = optional(number)<br/>  }))</pre> | `[]` | no |
 | <a name="input_archives"></a> [archives](#input\_archives) | Event archives on the effective event bus. KMS encryption on archives is not supported until the cloudwatch\_event\_archive primitive exposes a KMS argument. | <pre>list(object({<br/>    name               = string<br/>    event_pattern_json = optional(string)<br/>    retention_days     = optional(number)<br/>  }))</pre> | `[]` | no |
 | <a name="input_bus"></a> [bus](#input\_bus) | Event bus configuration: create a custom bus or use an existing bus. | <pre>object({<br/>    create            = bool<br/>    name              = optional(string)<br/>    existing_bus_name = optional(string)<br/>    existing_bus_arn  = optional(string)<br/>    policies          = optional(list(string), [])<br/>  })</pre> | n/a | yes |
@@ -103,7 +122,7 @@ Configure AWS credentials and run from the repo root with `mise`/`asdf` Go and T
 | <a name="input_resource_names_map"></a> [resource\_names\_map](#input\_resource\_names\_map) | Map consumed by the resource naming module (for\_each key -> { name, max\_length }). | <pre>map(object({<br/>    name       = string<br/>    max_length = optional(number, 60)<br/>  }))</pre> | <pre>{<br/>  "api_destination": {<br/>    "max_length": 64,<br/>    "name": "apid"<br/>  },<br/>  "event_archive": {<br/>    "max_length": 48,<br/>    "name": "arc"<br/>  },<br/>  "event_bus": {<br/>    "max_length": 256,<br/>    "name": "ebus"<br/>  },<br/>  "event_connection": {<br/>    "max_length": 64,<br/>    "name": "conn"<br/>  },<br/>  "event_rule": {<br/>    "max_length": 64,<br/>    "name": "rule"<br/>  },<br/>  "pipe": {<br/>    "max_length": 64,<br/>    "name": "pipe"<br/>  },<br/>  "schedule": {<br/>    "max_length": 64,<br/>    "name": "sched"<br/>  },<br/>  "schedule_group": {<br/>    "max_length": 64,<br/>    "name": "sgrp"<br/>  }<br/>}</pre> | no |
 | <a name="input_rules"></a> [rules](#input\_rules) | EventBridge rules and targets on the effective event bus. | <pre>list(object({<br/>    name               = string<br/>    description        = optional(string)<br/>    state              = optional(string, "ENABLED")<br/>    event_pattern_json = string<br/>    targets = list(object({<br/>      name                       = string<br/>      arn                        = string<br/>      type                       = string<br/>      role_arn                   = optional(string)<br/>      create_role                = optional(bool, false)<br/>      dlq_arn                    = optional(string)<br/>      retry_policy               = optional(any)<br/>      input_json                 = optional(string)<br/>      input_path                 = optional(string)<br/>      input_transformer          = optional(any)<br/>      service_specific_overrides = optional(any)<br/>    }))<br/>  }))</pre> | `[]` | no |
 | <a name="input_schedule_groups"></a> [schedule\_groups](#input\_schedule\_groups) | Scheduler schedule groups to create. Map keys must be static strings in configuration (Terraform for\_each keys).<br/>Values.name is the AWS group name and may depend on apply-time values (e.g. random\_id). Schedules that use a<br/>custom group must set group\_name to the same name string; schedules using only the built-in "default" group<br/>can omit group\_name. | <pre>map(object({<br/>    name = string<br/>  }))</pre> | `{}` | no |
-| <a name="input_schedules"></a> [schedules](#input\_schedules) | EventBridge Scheduler schedules. | <pre>list(object({<br/>    name                         = string<br/>    group_name                   = optional(string)<br/>    schedule_expression          = string<br/>    schedule_expression_timezone = optional(string)<br/>    start_date                   = optional(string)<br/>    end_date                     = optional(string)<br/>    flexible_time_window         = optional(any)<br/>    target_arn                   = string<br/>    target_input_json            = optional(string)<br/>    retry_policy                 = optional(any)<br/>    dead_letter_arn              = optional(string)<br/>    role_arn                     = optional(string)<br/>    create_role                  = optional(bool, false)<br/>  }))</pre> | `[]` | no |
+| <a name="input_schedules"></a> [schedules](#input\_schedules) | EventBridge Scheduler schedules. | <pre>list(object({<br/>    name                         = string<br/>    group_name                   = optional(string)<br/>    schedule_expression          = string<br/>    schedule_expression_timezone = optional(string)<br/>    start_date                   = optional(string)<br/>    end_date                     = optional(string)<br/>    flexible_time_window         = optional(any)<br/>    target_arn                   = string<br/>    target_input_json            = optional(string)<br/>    retry_policy                 = optional(any)<br/>    dead_letter_arn              = optional(string)<br/>    role_arn                     = optional(string)<br/>    create_role                  = optional(bool, false)<br/>    ecs_parameters               = optional(any)<br/>  }))</pre> | `[]` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Required organizational tags applied to all taggable resources. | `map(string)` | n/a | yes |
 
 ## Outputs
@@ -119,6 +138,7 @@ Configure AWS credentials and run from the repo root with `mise`/`asdf` Go and T
 | <a name="output_event_target_iam_role_names"></a> [event\_target\_iam\_role\_names](#output\_event\_target\_iam\_role\_names) | Names of IAM roles created for EventBridge targets (create\_role = true), keyed by rule:target. |
 | <a name="output_pipe_arns"></a> [pipe\_arns](#output\_pipe\_arns) | Pipe ARNs sorted by pipe name. |
 | <a name="output_pipe_iam_role_names"></a> [pipe\_iam\_role\_names](#output\_pipe\_iam\_role\_names) | Names of IAM roles created for Pipes (create\_role = true). |
+| <a name="output_required_tag_keys"></a> [required\_tag\_keys](#output\_required\_tag\_keys) | Echo of var.required\_tag\_keys after validation (for policy and composition). |
 | <a name="output_rule_arns"></a> [rule\_arns](#output\_rule\_arns) | Rule ARNs sorted by rule name for stable ordering. |
 | <a name="output_rule_names"></a> [rule\_names](#output\_rule\_names) | Deployed EventBridge rule names (prefixed), in the same order as var.rules. |
 | <a name="output_schedule_arns"></a> [schedule\_arns](#output\_schedule\_arns) | Schedule ARNs sorted by schedule name. |

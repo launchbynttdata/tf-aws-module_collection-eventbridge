@@ -235,6 +235,13 @@ variable "schedule_groups" {
     name = string
   }))
   default = {}
+
+  validation {
+    condition = length(distinct([for _, g in var.schedule_groups : g.name])) == length([
+      for _, g in var.schedule_groups : g.name
+    ])
+    error_message = "schedule_groups map entries must use distinct name values (each AWS schedule group name must be unique)."
+  }
 }
 
 variable "schedules" {
@@ -253,8 +260,17 @@ variable "schedules" {
     dead_letter_arn              = optional(string)
     role_arn                     = optional(string)
     create_role                  = optional(bool, false)
+    ecs_parameters               = optional(any)
   }))
   default = []
+
+  validation {
+    condition = alltrue([
+      for s in var.schedules :
+      !startswith(s.target_arn, "arn:aws:ecs:") || try(s.ecs_parameters, null) != null
+    ])
+    error_message = "When schedules[*].target_arn is an ECS ARN, ecs_parameters must be set (required by EventBridge Scheduler)."
+  }
 
   validation {
     condition = alltrue([
@@ -409,10 +425,4 @@ variable "api_destinations" {
     ])
     error_message = "Each api_destinations[*].auth_parameters must include oauth, basic, or api_key."
   }
-}
-
-variable "advanced_config" {
-  description = "Reserved escape hatch for future passthrough of provider-native settings. Must not be used to bypass tagging or IAM controls."
-  type        = any
-  default     = null
 }

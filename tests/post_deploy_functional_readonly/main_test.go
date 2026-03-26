@@ -17,6 +17,8 @@ const (
 )
 
 func TestEventBridgeCollectionReadOnly(t *testing.T) {
+	testimpl.LogPostDeployReadOnlyHints(t)
+
 	ctx := types.CreateTestContextBuilder().
 		SetTestConfig(&testimpl.ThisTFModuleConfig{}).
 		SetTestConfigFolderName(testConfigsExamplesFolderDefault).

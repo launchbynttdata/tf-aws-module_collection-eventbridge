@@ -22,14 +22,19 @@ import (
 
 const (
 	// Variable validation messages from variables.tf (2026-03-24 review follow-ups).
-	wantScheduleGroupErr       = `schedules[*].group_name other than the built-in "default" must match`
-	wantPipeRoleErr            = "Each pipe must either set create_role"
-	wantDuplicateRuleNamesErr  = "rules[*].name values must be unique"
+	wantScheduleGroupErr      = `schedules[*].group_name other than the built-in "default" must match`
+	wantPipeRoleErr           = "Each pipe must either set create_role"
+	wantDuplicateRuleNamesErr = "rules[*].name values must be unique"
 	// Terraform CLI wraps error_message across lines between "supported" and "Scheduler target".
-	wantScheduleTargetClassErr = "When schedules[*].create_role is true, target_arn must be a supported"
+	wantScheduleTargetClassErr  = "When schedules[*].create_role is true, target_arn must be a supported"
+	wantScheduleGroupsUniqueErr = "schedule_groups map entries must use distinct"
+	wantScheduleEcsParamsErr    = "ecs_parameters must be set"
 )
 
-var eventBusPolicyForEachKeyRe = regexp.MustCompile(`module\.collection\.module\.event_bus_policy\["([a-f0-9]{64})"\]`)
+var (
+	eventBusPolicyForEachKeyRe = regexp.MustCompile(`module\.collection\.module\.event_bus_policy\["([a-f0-9]{64})"\]`)
+	eventBridgeRuleARNRE       = regexp.MustCompile(`arn:aws:events:[a-z0-9-]+:[0-9]{12}:rule/[^"]+`)
+)
 
 func TestPlan_scheduleGroup_matchesDeclaredGroup(t *testing.T) {
 	opts := planOpts(t, "pass_schedule_group_match.tfvars")
@@ -79,9 +84,6 @@ func TestPlan_pipe_externalRoleMissingRoleArn_failsValidation(t *testing.T) {
 func TestPlan_scheduler_firehoseCreateRole_policyIncludesFirehoseActions(t *testing.T) {
 	opts := planOpts(t, "pass_scheduler_firehose.tfvars")
 	plan := initPlanShowStructOrSkip(t, opts)
-	if plan == nil {
-		return
-	}
 	found := plannedIAMPolicyDocumentsContaining(plan, "firehose:PutRecord")
 	require.NotEmpty(t, found, "expected at least one planned IAM policy document to grant firehose:PutRecord for Firehose scheduler target")
 }
@@ -103,9 +105,6 @@ func TestPlan_scheduleUnsupportedTarget_failsValidation(t *testing.T) {
 func TestPlan_busPolicy_forEachKeysAreContentHashes(t *testing.T) {
 	opts := planOpts(t, "pass_bus_policies_stable.tfvars")
 	plan := initPlanShowStructOrSkip(t, opts)
-	if plan == nil {
-		return
-	}
 	keys := plannedEventBusPolicyForEachKeys(plan)
 	require.Len(t, keys, 2, "expected two event bus policy module instances")
 	for _, k := range keys {
@@ -148,6 +147,50 @@ func TestPlan_apiDestination_sameDestinationNameDistinctConnections_distinctPlan
 	require.NotEqual(t, withA, withB, "AWS API destination names must differ when only connection_name differs")
 }
 
+func TestPlan_defaultBus_ruleTargetCreateRole_trustPolicyUsesDefaultBusRuleArnShape(t *testing.T) {
+	opts := planOpts(t, "pass_default_bus_rule_target_create_role.tfvars")
+	plan := initPlanShowStructOrSkip(t, opts)
+
+	policies := plannedEventTargetAssumeRolePolicies(plan)
+	require.NotEmpty(t, policies, "expected planned IAM roles for event targets with create_role")
+	for _, doc := range policies {
+		for _, arn := range eventBridgeRuleARNsInString(doc) {
+			require.Equal(t, 1, eventBridgeRulePathSegmentCount(arn),
+				"default event bus rule ARN must be arn:aws:events:region:account:rule/<RuleName> (single path segment after :rule/), got %q", arn)
+			require.NotContains(t, arn, "rule/default/",
+				"must not use a named-bus style SourceArn with literal default/ for the account default bus; got %q", arn)
+		}
+	}
+}
+
+func TestPlan_customBus_ruleTargetCreateRole_trustPolicyUsesNamedBusRuleArnShape(t *testing.T) {
+	opts := planOpts(t, "pass_custom_bus_rule_target_create_role.tfvars")
+	plan := initPlanShowStructOrSkip(t, opts)
+
+	policies := plannedEventTargetAssumeRolePolicies(plan)
+	require.NotEmpty(t, policies, "expected planned IAM roles for event targets with create_role")
+	for _, doc := range policies {
+		for _, arn := range eventBridgeRuleARNsInString(doc) {
+			require.Equal(t, 2, eventBridgeRulePathSegmentCount(arn),
+				"custom event bus rule ARN must be arn:aws:events:region:account:rule/<BusName>/<RuleName>; got %q", arn)
+		}
+	}
+}
+
+func TestPlan_validation_scheduleGroups_duplicateNames(t *testing.T) {
+	opts := planOpts(t, "fail_schedule_groups_duplicate_names.tfvars")
+	_, err := terraform.InitAndPlanE(t, opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), wantScheduleGroupsUniqueErr)
+}
+
+func TestPlan_validation_schedule_ecsMissingParameters(t *testing.T) {
+	opts := planOpts(t, "fail_schedule_ecs_missing_parameters.tfvars")
+	_, err := terraform.InitAndPlanE(t, opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), wantScheduleEcsParamsErr)
+}
+
 func planOpts(t *testing.T, scenarioFile string) *terraform.Options {
 	t.Helper()
 	dir := fixtureDir(t)
@@ -163,10 +206,10 @@ func planOpts(t *testing.T, scenarioFile string) *terraform.Options {
 		NoColor: true,
 		Logger:  logger.Discard,
 		EnvVars: map[string]string{
-			"AWS_REGION":            region,
-			"AWS_DEFAULT_REGION":    region,
-			"TF_IN_AUTOMATION":      "true",
-			"TF_INPUT":              "0",
+			"AWS_REGION":         region,
+			"AWS_DEFAULT_REGION": region,
+			"TF_IN_AUTOMATION":   "true",
+			"TF_INPUT":           "0",
 		},
 	}
 	return opts
@@ -209,6 +252,10 @@ func initPlanShowStructOrSkip(t *testing.T, opts *terraform.Options) *terraform.
 
 	plan, err := terraform.InitAndPlanAndShowWithStructE(t, opts)
 	if err != nil && planFailsOnlyForLiveAWS(err) {
+		if strict := os.Getenv("REVIEW_PLAN_REQUIRE_AWS"); strict == "1" || strict == "true" {
+			require.NoError(t, err, "REVIEW_PLAN_REQUIRE_AWS is set but plan failed (working AWS credentials required)")
+			return nil
+		}
 		t.Skipf("skipping: full plan needs working AWS credentials (STS / module data sources): %v", err)
 		return nil
 	}
@@ -291,6 +338,38 @@ func afterUnknownHasTrue(u interface{}, key string) bool {
 		}
 	}
 	return false
+}
+
+func eventBridgeRulePathSegmentCount(arn string) int {
+	const mark = ":rule/"
+	i := strings.Index(arn, mark)
+	if i < 0 {
+		return 0
+	}
+	tail := arn[i+len(mark):]
+	if tail == "" {
+		return 0
+	}
+	return strings.Count(tail, "/") + 1
+}
+
+func eventBridgeRuleARNsInString(s string) []string {
+	return eventBridgeRuleARNRE.FindAllString(s, -1)
+}
+
+func plannedEventTargetAssumeRolePolicies(plan *terraform.PlanStruct) []string {
+	var out []string
+	for addr, res := range plan.ResourcePlannedValuesMap {
+		if res.Type != "aws_iam_role" || !strings.Contains(addr, "iam_role_event_target") {
+			continue
+		}
+		raw, ok := res.AttributeValues["assume_role_policy"].(string)
+		if !ok || raw == "" {
+			continue
+		}
+		out = append(out, raw)
+	}
+	return out
 }
 
 func plannedIAMPolicyDocumentsContaining(plan *terraform.PlanStruct, needle string) []string {

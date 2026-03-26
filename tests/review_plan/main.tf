@@ -16,7 +16,6 @@ module "collection" {
   schedule_groups   = var.schedule_groups
   pipes             = var.pipes
   api_destinations  = var.api_destinations
-  advanced_config   = var.advanced_config
 }
 
 // This provider is added here to support the non-standard test configuration for these review plan tests.

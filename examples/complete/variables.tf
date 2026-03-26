@@ -140,6 +140,7 @@ variable "schedules" {
     dead_letter_arn              = optional(string)
     role_arn                     = optional(string)
     create_role                  = optional(bool, false)
+    ecs_parameters               = optional(any)
   }))
   default = []
 }
@@ -172,11 +173,6 @@ variable "api_destinations" {
     rate_limit_per_second = optional(number)
   }))
   default = []
-}
-
-variable "advanced_config" {
-  type    = any
-  default = null
 }
 
 variable "sns_topic_name" {

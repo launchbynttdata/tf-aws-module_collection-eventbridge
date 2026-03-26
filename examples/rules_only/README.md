@@ -53,6 +53,7 @@
 |------|-------------|
 | <a name="output_bus_arn"></a> [bus\_arn](#output\_bus\_arn) | n/a |
 | <a name="output_bus_name"></a> [bus\_name](#output\_bus\_name) | n/a |
+| <a name="output_required_tag_keys"></a> [required\_tag\_keys](#output\_required\_tag\_keys) | Pass-through from the collection module. |
 | <a name="output_rule_names"></a> [rule\_names](#output\_rule\_names) | n/a |
 | <a name="output_sns_topic_arn"></a> [sns\_topic\_arn](#output\_sns\_topic\_arn) | n/a |
 <!-- END_TF_DOCS -->

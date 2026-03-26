@@ -69,6 +69,10 @@ go/lint: terraform-init-all
 
 .NOTPARALLEL: lint
 
+# LCAF registers multiple test:: double-colon rules (e.g. go/test vs tfmodule plan/conftest/regula). Under make -j,
+# those recipes can run concurrently, race terraform in examples, and interleave logs so failures look like noise.
+.NOTPARALLEL: test check
+
 MODULE_DIR ?= ${COMPONENTS_DIR}/module
 
 PYTHON3_INSTALLED = $(shell which python3 > /dev/null 2>&1; echo $$?)
@@ -150,3 +154,9 @@ clean:
 
 # Also run full-root init before components' tfmodule/init (covers repo root without main.tf).
 tfmodule/init: terraform-init-all
+
+# review_plan Terratest: without credentials, plan-based tests skip. Set REVIEW_PLAN_REQUIRE_AWS=1 so missing
+# credentials fail the run (use in CI when this job must exercise full plan assertions).
+.PHONY: test-review-plan-strict
+test-review-plan-strict:
+	REVIEW_PLAN_REQUIRE_AWS=1 go test ./tests/review_plan/... -count=1

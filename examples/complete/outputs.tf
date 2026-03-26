@@ -72,3 +72,8 @@ output "api_destination_arns" {
 output "connection_arns" {
   value = module.eventbridge_collection.connection_arns
 }
+
+output "required_tag_keys" {
+  description = "Pass-through from the collection module."
+  value       = module.eventbridge_collection.required_tag_keys
+}

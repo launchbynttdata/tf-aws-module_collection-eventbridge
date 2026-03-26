@@ -51,8 +51,3 @@ variable "api_destinations" {
   type    = any
   default = []
 }
-
-variable "advanced_config" {
-  type    = any
-  default = null
-}

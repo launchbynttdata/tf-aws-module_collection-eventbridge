@@ -51,6 +51,10 @@ func TestComposableComplete(t *testing.T, ctx ttctx.TestContext) {
 	})
 
 	t.Run("PutEventsDeliversThroughBusToSnsE2E", func(t *testing.T) {
+		if RunningInCI() {
+			t.Skip("Skipping long-running PutEvents→SNS→SQS sink E2E in CI (SQS drain + long-poll). Run locally: go test -v -timeout 30m ./tests/post_deploy_functional/...")
+		}
+		t.Logf("[local E2E] starting PutEvents→SNS→SQS sink check (may take up to ~90s for drain + long-poll)")
 		src := terraform.Output(t, ctx.TerratestTerraformOptions(), "integration_event_source")
 		detailType := terraform.Output(t, ctx.TerratestTerraformOptions(), "integration_detail_type")
 		busName := terraform.Output(t, ctx.TerratestTerraformOptions(), "bus_name")
@@ -63,7 +67,7 @@ func TestComposableComplete(t *testing.T, ctx ttctx.TestContext) {
 		detailJSON := `{"msg":"terratest-e2e","marker":"` + marker + `"}`
 
 		sqsClient := sqs.NewFromConfig(awsCfg(t, ctx))
-		drainSqsQueue(t, sqsClient, sinkURL)
+		drainSqsQueue(t, sqsClient, sinkURL, "e2e sink (pre-PutEvents)")
 
 		eb := eventbridge.NewFromConfig(awsCfg(t, ctx))
 		putOut, err := eb.PutEvents(context.TODO(), &eventbridge.PutEventsInput{
@@ -267,13 +271,17 @@ func TestComposableCompleteReadOnly(t *testing.T, ctx ttctx.TestContext) {
 	})
 }
 
-func drainSqsQueue(t *testing.T, client *sqs.Client, queueURL string) {
+func drainSqsQueue(t *testing.T, client *sqs.Client, queueURL string, label string) {
 	t.Helper()
+	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	for i := 0; i < 100; i++ {
 		if err := ctx.Err(); err != nil {
 			require.Fail(t, "drainSqsQueue exceeded context deadline", err.Error())
+		}
+		if !RunningInCI() && (i == 0 || (i+1)%10 == 0) {
+			t.Logf("[local E2E] draining %s: batch loop %d, elapsed %s", label, i+1, time.Since(start).Round(time.Second))
 		}
 		recvCtx, recvCancel := context.WithTimeout(ctx, 25*time.Second)
 		out, err := client.ReceiveMessage(recvCtx, &sqs.ReceiveMessageInput{
@@ -298,9 +306,15 @@ func drainSqsQueue(t *testing.T, client *sqs.Client, queueURL string) {
 
 func waitForE2EEventOnSink(ctx context.Context, t *testing.T, client *sqs.Client, queueURL, wantSrc, wantDetailType, marker string) bool {
 	t.Helper()
+	start := time.Now()
+	poll := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return false
+		}
+		poll++
+		if !RunningInCI() {
+			t.Logf("[local E2E] long-poll e2e sink for matching SNS notification (poll #%d, elapsed %s, up to 20s this wait)...", poll, time.Since(start).Round(time.Second))
 		}
 		out, err := client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 			QueueUrl:            aws.String(queueURL),

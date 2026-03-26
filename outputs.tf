@@ -65,3 +65,8 @@ output "pipe_iam_role_names" {
   description = "Names of IAM roles created for Pipes (create_role = true)."
   value       = { for k, m in module.iam_role_pipe : k => m.role_name }
 }
+
+output "required_tag_keys" {
+  description = "Echo of var.required_tag_keys after validation (for policy and composition)."
+  value       = local.required_tag_keys_resolved
+}

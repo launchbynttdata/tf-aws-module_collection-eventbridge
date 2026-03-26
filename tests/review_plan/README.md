@@ -28,7 +28,6 @@ No resources.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_advanced_config"></a> [advanced\_config](#input\_advanced\_config) | n/a | `any` | `null` | no |
 | <a name="input_api_destinations"></a> [api\_destinations](#input\_api\_destinations) | n/a | `any` | `[]` | no |
 | <a name="input_archives"></a> [archives](#input\_archives) | n/a | `any` | `[]` | no |
 | <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | AWS region for the provider (Terratest sets this from the environment). | `string` | `"us-east-2"` | no |

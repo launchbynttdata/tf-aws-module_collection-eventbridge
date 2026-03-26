@@ -39,6 +39,7 @@ func runFunctionalTestOneExample(t *testing.T, ctx *ttctx.TestContext, dir, varF
 
 	opts := ctx.TerratestTerraformOptions()
 	ConfigureTerraformAWSRegionFromSDK(t, opts)
+	ConfigureLocalE2ETerraformLogging(t, opts)
 	defer terraform.Destroy(t, opts)
 
 	test_structure.RunTestStage(t, "setup_test_"+ctx.CurrentTestName(), func() {
