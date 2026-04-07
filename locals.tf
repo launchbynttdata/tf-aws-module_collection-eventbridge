@@ -153,25 +153,29 @@ locals {
   }
 
   pipes_pipe_full_names = {
-    for k, _ in local.pipes_by_name : k => (
-      length("${module.resource_names["pipe"].standard}-${k}") <= 64 ?
-      "${module.resource_names["pipe"].standard}-${k}" :
-      (
-        64 - length(k) - 1 >= 1 ?
-        "${substr(module.resource_names["pipe"].standard, 0, 64 - length(k) - 1)}-${k}" :
-        substr(sha256("${module.resource_names["pipe"].standard}-${k}"), 0, 64)
+    for k, v in local.pipes_by_name : k => (
+      try(v.name_override, null) != null && v.name_override != "" ? v.name_override : (
+        length("${module.resource_names["pipe"].standard}-${k}") <= 64 ?
+        "${module.resource_names["pipe"].standard}-${k}" :
+        (
+          64 - length(k) - 1 >= 1 ?
+          "${substr(module.resource_names["pipe"].standard, 0, 64 - length(k) - 1)}-${k}" :
+          substr(sha256("${module.resource_names["pipe"].standard}-${k}"), 0, 64)
+        )
       )
     )
   }
 
   scheduler_schedule_full_names = {
-    for k, _ in local.schedules_by_name : k => (
-      length("${module.resource_names["schedule"].standard}-${k}") <= 64 ?
-      "${module.resource_names["schedule"].standard}-${k}" :
-      (
-        64 - length(k) - 1 >= 1 ?
-        "${substr(module.resource_names["schedule"].standard, 0, 64 - length(k) - 1)}-${k}" :
-        substr(sha256("${module.resource_names["schedule"].standard}-${k}"), 0, 64)
+    for k, v in local.schedules_by_name : k => (
+      try(v.name_override, null) != null && v.name_override != "" ? v.name_override : (
+        length("${module.resource_names["schedule"].standard}-${k}") <= 64 ?
+        "${module.resource_names["schedule"].standard}-${k}" :
+        (
+          64 - length(k) - 1 >= 1 ?
+          "${substr(module.resource_names["schedule"].standard, 0, 64 - length(k) - 1)}-${k}" :
+          substr(sha256("${module.resource_names["schedule"].standard}-${k}"), 0, 64)
+        )
       )
     )
   }

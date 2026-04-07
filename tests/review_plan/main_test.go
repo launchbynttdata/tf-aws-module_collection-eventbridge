@@ -60,6 +60,30 @@ func TestPlan_scheduleGroup_orphanGroupName_failsValidation(t *testing.T) {
 	require.Contains(t, err.Error(), wantScheduleGroupErr)
 }
 
+func TestPlan_pipe_nameOverride_usesProvidedName(t *testing.T) {
+	opts := planOpts(t, "pass_pipe_schedule_name_override.tfvars")
+	plan := initPlanShowStructOrSkip(t, opts)
+
+	pipe := findPlannedResource(plan, "aws_pipes_pipe", `pipes_pipe["logical-pipe-name"]`)
+	require.NotNil(t, pipe, "expected aws_pipes_pipe for logical-pipe-name in plan")
+	name, ok := pipe.AttributeValues["name"].(string)
+	require.True(t, ok, "pipe name should be a string in planned values")
+	require.Equal(t, "my-exact-aws-pipe-name", name,
+		"name_override must be used as the deployed AWS pipe name verbatim, ignoring the Launch naming prefix")
+}
+
+func TestPlan_schedule_nameOverride_usesProvidedName(t *testing.T) {
+	opts := planOpts(t, "pass_pipe_schedule_name_override.tfvars")
+	plan := initPlanShowStructOrSkip(t, opts)
+
+	sched := findPlannedResource(plan, "aws_scheduler_schedule", `scheduler_schedule["logical-schedule-name"]`)
+	require.NotNil(t, sched, "expected aws_scheduler_schedule for logical-schedule-name in plan")
+	name, ok := sched.AttributeValues["name"].(string)
+	require.True(t, ok, "schedule name should be a string in planned values")
+	require.Equal(t, "my-exact-aws-schedule-name", name,
+		"name_override must be used as the deployed AWS schedule name verbatim, ignoring the Launch naming prefix")
+}
+
 func TestPlan_pipe_createRoleWithoutRoleArn_succeeds(t *testing.T) {
 	opts := planOpts(t, "pass_pipe_create_role.tfvars")
 	plan := initPlanShowStructOrSkip(t, opts)

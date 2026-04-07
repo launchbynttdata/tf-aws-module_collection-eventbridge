@@ -248,6 +248,7 @@ variable "schedules" {
   description = "EventBridge Scheduler schedules."
   type = list(object({
     name                         = string
+    name_override                = optional(string)
     group_name                   = optional(string)
     schedule_expression          = string
     schedule_expression_timezone = optional(string)
@@ -314,12 +315,22 @@ variable "schedules" {
     ])
     error_message = "When schedules[*].create_role is true, target_arn must be a supported Scheduler target (Lambda, SQS, SNS, Step Functions, EventBridge, Firehose, ECS, CodeBuild)."
   }
+
+  validation {
+    condition = alltrue([
+      for s in var.schedules :
+      try(s.name_override, null) == null ||
+      (length(s.name_override) >= 1 && length(s.name_override) <= 64)
+    ])
+    error_message = "When set, schedules[*].name_override must be 1–64 characters (AWS Scheduler schedule name limit)."
+  }
 }
 
 variable "pipes" {
   description = "EventBridge Pipes."
   type = list(object({
     name                  = string
+    name_override         = optional(string)
     source_arn            = string
     source_parameters     = optional(any)
     filter_criteria       = optional(any)
@@ -391,6 +402,15 @@ variable "pipes" {
       )
     ])
     error_message = "When pipes[*].create_role is true and enrichment_arn is set, enrichment must be Lambda, API Gateway (execute-api), EventBridge API destination, or Step Functions."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.pipes :
+      try(p.name_override, null) == null ||
+      (length(p.name_override) >= 1 && length(p.name_override) <= 64)
+    ])
+    error_message = "When set, pipes[*].name_override must be 1–64 characters (AWS EventBridge Pipe name limit)."
   }
 }
 

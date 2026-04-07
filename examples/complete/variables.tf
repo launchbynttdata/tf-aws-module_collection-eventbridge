@@ -128,6 +128,7 @@ variable "schedule_groups" {
 variable "schedules" {
   type = list(object({
     name                         = string
+    name_override                = optional(string)
     group_name                   = optional(string)
     schedule_expression          = string
     schedule_expression_timezone = optional(string)
@@ -148,6 +149,7 @@ variable "schedules" {
 variable "pipes" {
   type = list(object({
     name                  = string
+    name_override         = optional(string)
     source_arn            = string
     source_parameters     = optional(any)
     filter_criteria       = optional(any)
