@@ -61,6 +61,10 @@ locals {
 
   pipes_by_name = { for p in var.pipes : p.name => p }
 
+  # var.pipes is any; optional keys are read via lookup(tomap(v), ...) so omitted keys do not break type checking.
+  pipe_name_override_by_key = { for k, v in local.pipes_by_name : k => lookup(tomap(v), "name_override", null) }
+  pipe_enrichment_arn_by_key = { for k, v in local.pipes_by_name : k => lookup(tomap(v), "enrichment_arn", null) }
+
   api_destinations_by_key = {
     for i, a in var.api_destinations : "${a.connection_name}:${a.destination_name}" => merge(a, { _index = i })
   }
@@ -154,7 +158,7 @@ locals {
 
   pipes_pipe_full_names = {
     for k, v in local.pipes_by_name : k => (
-      try(v.name_override, null) != null && v.name_override != "" ? v.name_override : (
+      local.pipe_name_override_by_key[k] != null && local.pipe_name_override_by_key[k] != "" ? local.pipe_name_override_by_key[k] : (
         length("${module.resource_names["pipe"].standard}-${k}") <= 64 ?
         "${module.resource_names["pipe"].standard}-${k}" :
         (
@@ -268,17 +272,17 @@ locals {
 
   pipe_enrichment_actions = {
     for k, v in local.pipes_needing_role : k => compact(concat(
-      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
-        startswith(v.enrichment_arn, "arn:aws:lambda:") ? ["lambda:InvokeFunction"] : []
+      local.pipe_enrichment_arn_by_key[k] == null || local.pipe_enrichment_arn_by_key[k] == "" ? [] : (
+        startswith(local.pipe_enrichment_arn_by_key[k], "arn:aws:lambda:") ? ["lambda:InvokeFunction"] : []
       ),
-      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
-        startswith(v.enrichment_arn, "arn:aws:execute-api:") ? ["execute-api:Invoke"] : []
+      local.pipe_enrichment_arn_by_key[k] == null || local.pipe_enrichment_arn_by_key[k] == "" ? [] : (
+        startswith(local.pipe_enrichment_arn_by_key[k], "arn:aws:execute-api:") ? ["execute-api:Invoke"] : []
       ),
-      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
-        can(regex("^arn:aws:events:[^:]+:[^:]+:api-destination/", v.enrichment_arn)) ? ["events:InvokeApiDestination"] : []
+      local.pipe_enrichment_arn_by_key[k] == null || local.pipe_enrichment_arn_by_key[k] == "" ? [] : (
+        can(regex("^arn:aws:events:[^:]+:[^:]+:api-destination/", local.pipe_enrichment_arn_by_key[k])) ? ["events:InvokeApiDestination"] : []
       ),
-      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
-        startswith(v.enrichment_arn, "arn:aws:states:") ? ["states:StartSyncExecution", "states:StartExecution"] : []
+      local.pipe_enrichment_arn_by_key[k] == null || local.pipe_enrichment_arn_by_key[k] == "" ? [] : (
+        startswith(local.pipe_enrichment_arn_by_key[k], "arn:aws:states:") ? ["states:StartSyncExecution", "states:StartExecution"] : []
       ),
     ))
   }
@@ -310,11 +314,11 @@ locals {
           resources = [v.target_arn]
         }
       },
-      try(v.enrichment_arn, null) != null && v.enrichment_arn != "" && length(local.pipe_enrichment_actions[k]) > 0 ? {
+      local.pipe_enrichment_arn_by_key[k] != null && local.pipe_enrichment_arn_by_key[k] != "" && length(local.pipe_enrichment_actions[k]) > 0 ? {
         PipeInvokeEnrichment = {
           sid       = "PipeInvokeEnrichment"
           actions   = local.pipe_enrichment_actions[k]
-          resources = [v.enrichment_arn]
+          resources = [local.pipe_enrichment_arn_by_key[k]]
         }
       } : {},
       try(v.source_kms_key_arn, null) != null && v.source_kms_key_arn != "" ? {
