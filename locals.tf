@@ -321,11 +321,11 @@ locals {
           resources = [local.pipe_enrichment_arn_by_key[k]]
         }
       } : {},
-      try(v.source_kms_key_arn, null) != null && v.source_kms_key_arn != "" ? {
+      try(v.source_kms_key_arn, null) != null && try(v.source_kms_key_arn, "") != "" ? {
         PipeKmsDecryptSource = {
           sid       = "PipeKmsDecryptSource"
           actions   = ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey"]
-          resources = [v.source_kms_key_arn]
+          resources = [try(v.source_kms_key_arn, "")]
         }
       } : {},
     )
