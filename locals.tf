@@ -61,9 +61,9 @@ locals {
 
   pipes_by_name = { for p in var.pipes : p.name => p }
 
-  # var.pipes is any; optional keys are read via lookup(tomap(v), ...) so omitted keys do not break type checking.
-  pipe_name_override_by_key = { for k, v in local.pipes_by_name : k => lookup(tomap(v), "name_override", null) }
-  pipe_enrichment_arn_by_key = { for k, v in local.pipes_by_name : k => lookup(tomap(v), "enrichment_arn", null) }
+  # var.pipes is any with heterogeneous shapes; use try() — tomap(v) fails when nested attribute types differ across pipes.
+  pipe_name_override_by_key = { for k, v in local.pipes_by_name : k => try(v.name_override, null) }
+  pipe_enrichment_arn_by_key = { for k, v in local.pipes_by_name : k => try(v.enrichment_arn, null) }
 
   api_destinations_by_key = {
     for i, a in var.api_destinations : "${a.connection_name}:${a.destination_name}" => merge(a, { _index = i })
