@@ -319,8 +319,7 @@ variable "schedules" {
   validation {
     condition = alltrue([
       for s in var.schedules :
-      try(s.name_override, null) == null ||
-      (length(s.name_override) >= 1 && length(s.name_override) <= 64)
+      try(s.name_override, null) == null || (try(length(s.name_override), 0) >= 1 && try(length(s.name_override), 0) <= 64)
     ])
     error_message = "When set, schedules[*].name_override must be 1–64 characters (AWS Scheduler schedule name limit)."
   }
@@ -328,20 +327,12 @@ variable "schedules" {
 
 variable "pipes" {
   description = "EventBridge Pipes."
-  type = list(object({
-    name                  = string
-    name_override         = optional(string)
-    source_arn            = string
-    source_parameters     = optional(any)
-    filter_criteria       = optional(any)
-    enrichment_arn        = optional(string)
-    enrichment_parameters = optional(any)
-    target_arn            = string
-    target_parameters     = optional(any)
-    role_arn              = optional(string)
-    create_role           = optional(bool, false)
-    source_kms_key_arn    = optional(string)
-  }))
+  # type = any is required so callers can pass a list whose elements have different
+  # target_parameters / source_parameters shapes (e.g. step-functions vs. lambda).
+  # Terraform cannot find a common base type for a list literal whose object elements
+  # differ in attribute sets, even when those attributes are typed optional(any).
+  # All validations below use try()/coalesce() and remain fully effective.
+  type    = any
   default = []
 
   validation {
@@ -407,8 +398,7 @@ variable "pipes" {
   validation {
     condition = alltrue([
       for p in var.pipes :
-      try(p.name_override, null) == null ||
-      (length(p.name_override) >= 1 && length(p.name_override) <= 64)
+      try(p.name_override, null) == null || (try(length(p.name_override), 0) >= 1 && try(length(p.name_override), 0) <= 64)
     ])
     error_message = "When set, pipes[*].name_override must be 1–64 characters (AWS EventBridge Pipe name limit)."
   }
