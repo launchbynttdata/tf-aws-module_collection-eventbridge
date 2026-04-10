@@ -205,6 +205,17 @@ module "iam_role_policy_attachment_scheduler" {
   policy_arn = module.iam_policy_scheduler[each.key].policy_arn
 }
 
+module "pipe_execution_log_group" {
+  source   = "terraform.registry.launch.nttdata.com/module_primitive/cloudwatch_log_group/aws"
+  version  = "~> 1.6"
+  for_each = local.pipes_with_managed_execution_logging
+
+  name           = each.value.log_group_name
+  retention_days = try(each.value.pipe.managed_execution_logging.retention_in_days, 30)
+  kms_key_id     = try(each.value.pipe.managed_execution_logging.kms_key_id, null)
+  tags           = local.merged_tags
+}
+
 module "iam_role_pipe" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/iam_role/aws"
   version  = "~> 0.0"
@@ -320,5 +331,6 @@ module "pipes_pipe" {
   target_parameters     = try(each.value.target_parameters, null)
   enrichment            = try(each.value.enrichment_arn, null)
   enrichment_parameters = try(each.value.enrichment_parameters, null)
+  log_configuration     = local.pipe_effective_log_configuration[each.key]
   tags                  = local.merged_tags
 }

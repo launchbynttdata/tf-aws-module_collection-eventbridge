@@ -187,3 +187,20 @@ variable "sqs_queue_name_prefix" {
   type        = string
   default     = "eb-collection-pipe-src"
 }
+
+variable "pipe_managed_execution_logging" {
+  description = "Log level and CloudWatch retention for the example pipe when using managed_execution_logging (local.example_pipes)."
+  type = object({
+    level             = string
+    retention_in_days = number
+  })
+  default = {
+    level             = "INFO"
+    retention_in_days = 14
+  }
+
+  validation {
+    condition     = contains(["ERROR", "INFO", "TRACE"], var.pipe_managed_execution_logging.level)
+    error_message = "pipe_managed_execution_logging.level must be ERROR, INFO, or TRACE."
+  }
+}

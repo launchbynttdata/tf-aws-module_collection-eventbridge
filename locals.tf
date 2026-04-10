@@ -62,7 +62,7 @@ locals {
   pipes_by_name = { for p in var.pipes : p.name => p }
 
   # var.pipes is any with heterogeneous shapes; use try() — tomap(v) fails when nested attribute types differ across pipes.
-  pipe_name_override_by_key = { for k, v in local.pipes_by_name : k => try(v.name_override, null) }
+  pipe_name_override_by_key  = { for k, v in local.pipes_by_name : k => try(v.name_override, null) }
   pipe_enrichment_arn_by_key = { for k, v in local.pipes_by_name : k => try(v.enrichment_arn, null) }
 
   api_destinations_by_key = {
@@ -212,6 +212,37 @@ locals {
     if coalesce(v.create_role, false)
   }
 
+  # Managed CloudWatch log group for pipe execution logs (optional per pipe).
+  pipes_with_managed_execution_logging = {
+    for k, v in local.pipes_by_name : k => {
+      pipe           = v
+      log_group_name = trimspace(try(v.managed_execution_logging.name_override, "")) != "" ? trimspace(v.managed_execution_logging.name_override) : "/aws/vendedlogs/pipes/${local.pipes_pipe_full_names[k]}"
+    }
+    if try(v.managed_execution_logging, null) != null
+  }
+
+  pipe_execution_logs_kms_key_arn = {
+    for k, v in local.pipes_by_name : k =>
+    try(coalesce(nullif(try(v.execution_logs_kms_key_arn, ""), ""), nullif(try(v.managed_execution_logging.kms_key_id, ""), "")), null)
+  }
+
+  pipe_effective_log_configuration = {
+    for k, v in local.pipes_by_name : k => (
+      try(v.managed_execution_logging, null) != null ? {
+        level                           = coalesce(try(v.managed_execution_logging.level, null), try(v.log_configuration.level, null), "INFO")
+        include_execution_data          = try(coalesce(try(v.managed_execution_logging.include_execution_data, null), try(v.log_configuration.include_execution_data, null)), null)
+        cloudwatch_logs_log_destination = { log_group_arn = module.pipe_execution_log_group[k].log_group_arn }
+        firehose_log_destination        = try(v.log_configuration.firehose_log_destination, null)
+        s3_log_destination              = try(v.log_configuration.s3_log_destination, null)
+      } : try(v.log_configuration, null)
+    )
+  }
+
+  pipe_log_active = {
+    for k, v in local.pipes_by_name : k =>
+    local.pipe_effective_log_configuration[k] != null && try(local.pipe_effective_log_configuration[k].level, "OFF") != "OFF"
+  }
+
   event_target_policy_statements = {
     for k, v in local.event_targets_needing_role : k => merge(
       {
@@ -326,6 +357,34 @@ locals {
           sid       = "PipeKmsDecryptSource"
           actions   = ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey"]
           resources = [try(v.source_kms_key_arn, "")]
+        }
+      } : {},
+      local.pipe_log_active[k] && try(local.pipe_effective_log_configuration[k].cloudwatch_logs_log_destination.log_group_arn, null) != null ? {
+        PipeCloudWatchLogs = {
+          sid       = "PipeCloudWatchLogs"
+          actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+          resources = ["${local.pipe_effective_log_configuration[k].cloudwatch_logs_log_destination.log_group_arn}:*"]
+        }
+      } : {},
+      local.pipe_log_active[k] && try(local.pipe_effective_log_configuration[k].firehose_log_destination.delivery_stream_arn, null) != null ? {
+        PipeFirehoseLogs = {
+          sid       = "PipeFirehoseLogs"
+          actions   = ["firehose:PutRecord", "firehose:PutRecordBatch"]
+          resources = [local.pipe_effective_log_configuration[k].firehose_log_destination.delivery_stream_arn]
+        }
+      } : {},
+      local.pipe_log_active[k] && try(local.pipe_effective_log_configuration[k].s3_log_destination.bucket_name, null) != null ? {
+        PipeS3Logs = {
+          sid       = "PipeS3Logs"
+          actions   = ["s3:PutObject"]
+          resources = ["arn:aws:s3:::${local.pipe_effective_log_configuration[k].s3_log_destination.bucket_name}/*"]
+        }
+      } : {},
+      local.pipe_log_active[k] && local.pipe_execution_logs_kms_key_arn[k] != null ? {
+        PipeKmsExecutionLogs = {
+          sid       = "PipeKmsExecutionLogs"
+          actions   = ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey"]
+          resources = [local.pipe_execution_logs_kms_key_arn[k]]
         }
       } : {},
     )

@@ -288,6 +288,11 @@ locals {
     target_arn         = module.sns_topic.arn
     create_role        = true
     source_kms_key_arn = aws_kms_key.pipe_source_sqs.arn
+    # Creates /aws/vendedlogs/pipes/<prefixed pipe name> and enables execution logs on the pipe.
+    managed_execution_logging = {
+      level             = var.pipe_managed_execution_logging.level
+      retention_in_days = var.pipe_managed_execution_logging.retention_in_days
+    }
     filter_criteria = {
       filter = [
         { pattern = "{\"pipe\":{\"test\":[\"terratest\"]}}" }

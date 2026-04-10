@@ -326,7 +326,13 @@ variable "schedules" {
 }
 
 variable "pipes" {
-  description = "EventBridge Pipes."
+  description = <<-EOT
+    EventBridge Pipes. Optional execution logging:
+    - log_configuration — passed to the pipes_pipe primitive (level required when set; supports CloudWatch Logs, Firehose, S3 per AWS).
+    - managed_execution_logging — create a CloudWatch log group in this module and set log_configuration (mutually exclusive with log_configuration.cloudwatch_logs_log_destination).
+    - execution_logs_kms_key_arn — CMK for encrypted execution logs (BYO log group or Firehose/S3); merged with managed_execution_logging.kms_key_id when both apply.
+    When create_role is true, generated IAM includes logs (and KMS when a key is specified) for the configured destinations. With create_role false, attach equivalent permissions to role_arn.
+  EOT
   # type = any is required so callers can pass a list whose elements have different
   # target_parameters / source_parameters shapes (e.g. step-functions vs. lambda).
   # Terraform cannot find a common base type for a list literal whose object elements
@@ -401,6 +407,35 @@ variable "pipes" {
       try(p.name_override, null) == null || (try(length(p.name_override), 0) >= 1 && try(length(p.name_override), 0) <= 64)
     ])
     error_message = "When set, pipes[*].name_override must be 1–64 characters (AWS EventBridge Pipe name limit)."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.pipes :
+      !(try(p.managed_execution_logging, null) != null && try(p.log_configuration.cloudwatch_logs_log_destination, null) != null)
+    ])
+    error_message = "Do not set both pipes[*].managed_execution_logging and pipes[*].log_configuration.cloudwatch_logs_log_destination."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.pipes :
+      try(p.log_configuration, null) == null || (
+        try(p.log_configuration.level, null) != null && contains(["OFF", "ERROR", "INFO", "TRACE"], p.log_configuration.level)
+      )
+    ])
+    error_message = "When pipes[*].log_configuration is set, pipes[*].log_configuration.level is required and must be OFF, ERROR, INFO, or TRACE."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.pipes :
+      try(p.managed_execution_logging, null) == null || (
+        try(p.managed_execution_logging.level, null) == null ||
+        contains(["ERROR", "INFO", "TRACE"], p.managed_execution_logging.level)
+      )
+    ])
+    error_message = "When set, pipes[*].managed_execution_logging.level must be ERROR, INFO, or TRACE (not OFF; omit managed_execution_logging to disable)."
   }
 }
 
