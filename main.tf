@@ -19,7 +19,7 @@ module "resource_names" {
 
 module "event_bus" {
   source  = "terraform.registry.launch.nttdata.com/module_primitive/cloudwatch_event_bus/aws"
-  version = "~> 0.0"
+  version = "~> 0.1"
   count   = var.bus.create ? 1 : 0
 
   name = local.generated_bus_name
@@ -28,7 +28,7 @@ module "event_bus" {
 
 module "event_bus_policy" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/cloudwatch_event_bus_policy/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.1"
   for_each = length(coalesce(var.bus.policies, [])) > 0 ? { for p in var.bus.policies : sha256(p) => p } : {}
 
   event_bus_name = local.effective_event_bus_name
@@ -37,7 +37,7 @@ module "event_bus_policy" {
 
 module "event_archive" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/cloudwatch_event_archive/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.1"
   for_each = local.archives_by_name
 
   name             = local.event_archive_full_names[each.key]
@@ -61,7 +61,7 @@ module "event_connection" {
 
 module "event_api_destination" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/cloudwatch_event_api_destination/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.1"
   for_each = local.api_destinations_by_key
 
   name                             = local.event_api_destination_full_names[each.key]
@@ -74,7 +74,7 @@ module "event_api_destination" {
 
 module "event_rule" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/cloudwatch_event_rule/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.1"
   for_each = local.rules_by_name
 
   name           = local.event_rule_full_names[each.key]
@@ -87,7 +87,7 @@ module "event_rule" {
 
 module "event_target" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/cloudwatch_event_target/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.1"
   for_each = local.targets_by_key
 
   event_bus_name = local.effective_event_bus_name
@@ -114,7 +114,7 @@ module "event_target" {
 
 module "iam_role_event_target" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/iam_role/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.1"
   for_each = local.event_targets_needing_role
 
   name_prefix = "${substr(replace(each.key, ":", "-"), 0, 32)}-evt-"
@@ -143,7 +143,7 @@ module "iam_role_event_target" {
 
 module "iam_policy_event_target" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/iam_policy/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.4"
   for_each = local.event_targets_needing_role
 
   policy_name      = substr("${replace(each.key, ":", "-")}-evt-${local.iam_inline_policy_token}", 0, 128)
@@ -188,7 +188,7 @@ module "iam_role_scheduler" {
 
 module "iam_policy_scheduler" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/iam_policy/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.4"
   for_each = local.schedules_needing_role
 
   policy_name      = substr("${replace(each.key, ":", "-")}-sched-${local.iam_inline_policy_token}", 0, 128)
@@ -198,7 +198,7 @@ module "iam_policy_scheduler" {
 
 module "iam_role_policy_attachment_scheduler" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/iam_role_policy_attachment/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.4"
   for_each = local.schedules_needing_role
 
   role_name  = module.iam_role_scheduler[each.key].role_name
@@ -218,7 +218,7 @@ module "pipe_execution_log_group" {
 
 module "iam_role_pipe" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/iam_role/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.1"
   for_each = local.pipes_needing_role
 
   name_prefix = "${substr(replace(each.key, ":", "-"), 0, 32)}-pipe-"
@@ -247,7 +247,7 @@ module "iam_role_pipe" {
 
 module "iam_policy_pipe" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/iam_policy/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.4"
   for_each = local.pipes_needing_role
 
   policy_name      = substr("${replace(each.key, ":", "-")}-pipe-${local.iam_inline_policy_token}", 0, 128)
@@ -257,7 +257,7 @@ module "iam_policy_pipe" {
 
 module "iam_role_policy_attachment_pipe" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/iam_role_policy_attachment/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.2"
   for_each = local.pipes_needing_role
 
   role_name  = module.iam_role_pipe[each.key].role_name
@@ -266,7 +266,7 @@ module "iam_role_policy_attachment_pipe" {
 
 module "scheduler_schedule_group" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/scheduler_schedule_group/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.1"
   for_each = var.schedule_groups
 
   name = each.value.name
@@ -275,7 +275,7 @@ module "scheduler_schedule_group" {
 
 module "scheduler_schedule" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/scheduler_schedule/aws"
-  version  = "~> 0.0"
+  version  = "~> 1.0"
   for_each = local.schedules_by_name
 
   name                         = local.scheduler_schedule_full_names[each.key]
@@ -308,7 +308,7 @@ module "scheduler_schedule" {
 
 module "pipes_pipe" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/pipes_pipe/aws"
-  version  = "~> 0.0"
+  version  = "~> 0.1"
   for_each = local.pipes_by_name
 
   name = local.pipes_pipe_full_names[each.key]
