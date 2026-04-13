@@ -198,7 +198,7 @@ module "iam_policy_scheduler" {
 
 module "iam_role_policy_attachment_scheduler" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/iam_role_policy_attachment/aws"
-  version  = "~> 0.4"
+  version  = "~> 0.2"
   for_each = local.schedules_needing_role
 
   role_name  = module.iam_role_scheduler[each.key].role_name
@@ -275,7 +275,7 @@ module "scheduler_schedule_group" {
 
 module "scheduler_schedule" {
   source   = "terraform.registry.launch.nttdata.com/module_primitive/scheduler_schedule/aws"
-  version  = "~> 1.0"
+  version  = "~> 0.1"
   for_each = local.schedules_by_name
 
   name                         = local.scheduler_schedule_full_names[each.key]
