@@ -432,7 +432,7 @@ variable "pipes" {
       for p in var.pipes :
       try(p.managed_execution_logging, null) == null || (
         try(p.managed_execution_logging.level, null) == null ||
-        contains(["ERROR", "INFO", "TRACE"], p.managed_execution_logging.level)
+        contains(["ERROR", "INFO", "TRACE"], try(p.managed_execution_logging.level, ""))
       )
     ])
     error_message = "When set, pipes[*].managed_execution_logging.level must be ERROR, INFO, or TRACE (not OFF; omit managed_execution_logging to disable)."
