@@ -421,7 +421,7 @@ variable "pipes" {
     condition = alltrue([
       for p in var.pipes :
       try(p.log_configuration, null) == null || (
-        try(p.log_configuration.level, null) != null && contains(["OFF", "ERROR", "INFO", "TRACE"], p.log_configuration.level)
+        try(p.log_configuration.level, null) != null && contains(["OFF", "ERROR", "INFO", "TRACE"], try(p.log_configuration.level, ""))
       )
     ])
     error_message = "When pipes[*].log_configuration is set, pipes[*].log_configuration.level is required and must be OFF, ERROR, INFO, or TRACE."
