@@ -29,6 +29,8 @@ const (
 	wantScheduleTargetClassErr  = "When schedules[*].create_role is true, target_arn must be a supported"
 	wantScheduleGroupsUniqueErr = "schedule_groups map entries must use distinct"
 	wantScheduleEcsParamsErr    = "ecs_parameters must be set"
+	wantPipeNameOverrideLenErr  = "pipes[*].name_override must be 1–64 characters"
+	wantSchedNameOverrideLenErr = "schedules[*].name_override must be 1–64 characters"
 )
 
 // Embedded scenario for name_override tests (avoids a separate scenarios/*.tfvars file).
@@ -47,6 +49,30 @@ schedules = [
   {
     name                = "logical-schedule-name"
     name_override       = "my-exact-aws-schedule-name"
+    schedule_expression = "rate(24 hours)"
+    target_arn          = "arn:aws:sns:REGION_PLACEHOLDER:123456789012:review-plan-fake-sns"
+    create_role         = true
+  }
+]
+`
+
+// scenarioPipeNameOverrideTooLong exercises the pipes[*].name_override length validation (65 chars > 64 limit).
+const scenarioPipeNameOverrideTooLong = `pipes = [
+  {
+    name          = "logical-pipe-name"
+    name_override = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    source_arn    = "arn:aws:sqs:REGION_PLACEHOLDER:123456789012:review-plan-fake-sqs"
+    target_arn    = "arn:aws:sns:REGION_PLACEHOLDER:123456789012:review-plan-fake-sns"
+    create_role   = true
+  }
+]
+`
+
+// scenarioScheduleNameOverrideTooLong exercises the schedules[*].name_override length validation (65 chars > 64 limit).
+const scenarioScheduleNameOverrideTooLong = `schedules = [
+  {
+    name                = "logical-schedule-name"
+    name_override       = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     schedule_expression = "rate(24 hours)"
     target_arn          = "arn:aws:sns:REGION_PLACEHOLDER:123456789012:review-plan-fake-sns"
     create_role         = true
@@ -105,6 +131,20 @@ func TestPlan_schedule_nameOverride_usesProvidedName(t *testing.T) {
 	require.True(t, ok, "schedule name should be a string in planned values")
 	require.Equal(t, "my-exact-aws-schedule-name", name,
 		"name_override must be used as the deployed AWS schedule name verbatim, ignoring the Launch naming prefix")
+}
+
+func TestPlan_pipe_nameOverrideTooLong_failsValidation(t *testing.T) {
+	opts := planOptsFromEmbeddedScenario(t, scenarioPipeNameOverrideTooLong)
+	_, err := terraform.InitAndPlanE(t, opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), wantPipeNameOverrideLenErr)
+}
+
+func TestPlan_schedule_nameOverrideTooLong_failsValidation(t *testing.T) {
+	opts := planOptsFromEmbeddedScenario(t, scenarioScheduleNameOverrideTooLong)
+	_, err := terraform.InitAndPlanE(t, opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), wantSchedNameOverrideLenErr)
 }
 
 func TestPlan_pipe_createRoleWithoutRoleArn_succeeds(t *testing.T) {

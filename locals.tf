@@ -62,8 +62,9 @@ locals {
   pipes_by_name = { for p in var.pipes : p.name => p }
 
   # var.pipes is any with heterogeneous shapes; use try() — tomap(v) fails when nested attribute types differ across pipes.
-  pipe_name_override_by_key  = { for k, v in local.pipes_by_name : k => try(v.name_override, null) }
-  pipe_enrichment_arn_by_key = { for k, v in local.pipes_by_name : k => try(v.enrichment_arn, null) }
+  pipe_name_override_by_key      = { for k, v in local.pipes_by_name : k => try(v.name_override, null) }
+  pipe_enrichment_arn_by_key     = { for k, v in local.pipes_by_name : k => try(v.enrichment_arn, null) }
+  pipe_source_kms_key_arn_by_key = { for k, v in local.pipes_by_name : k => try(v.source_kms_key_arn, null) }
 
   api_destinations_by_key = {
     for i, a in var.api_destinations : "${a.connection_name}:${a.destination_name}" => merge(a, { _index = i })
@@ -352,11 +353,11 @@ locals {
           resources = [local.pipe_enrichment_arn_by_key[k]]
         }
       } : {},
-      try(v.source_kms_key_arn, null) != null && try(v.source_kms_key_arn, "") != "" ? {
+      local.pipe_source_kms_key_arn_by_key[k] != null && local.pipe_source_kms_key_arn_by_key[k] != "" ? {
         PipeKmsDecryptSource = {
           sid       = "PipeKmsDecryptSource"
           actions   = ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey"]
-          resources = [try(v.source_kms_key_arn, "")]
+          resources = [local.pipe_source_kms_key_arn_by_key[k]]
         }
       } : {},
       local.pipe_log_active[k] && try(local.pipe_effective_log_configuration[k].cloudwatch_logs_log_destination.log_group_arn, null) != null ? {
