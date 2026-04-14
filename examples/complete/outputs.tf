@@ -65,6 +65,16 @@ output "pipe_arns" {
   value = module.eventbridge_collection.pipe_arns
 }
 
+output "pipe_execution_log_group_names" {
+  description = "Log groups created when pipes use managed_execution_logging."
+  value       = module.eventbridge_collection.pipe_execution_log_group_names
+}
+
+output "pipe_execution_log_group_arns" {
+  description = "Log group ARNs for managed pipe execution logging."
+  value       = module.eventbridge_collection.pipe_execution_log_group_arns
+}
+
 output "api_destination_arns" {
   value = module.eventbridge_collection.api_destination_arns
 }

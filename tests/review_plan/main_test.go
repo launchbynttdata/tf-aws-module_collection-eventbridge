@@ -29,7 +29,56 @@ const (
 	wantScheduleTargetClassErr  = "When schedules[*].create_role is true, target_arn must be a supported"
 	wantScheduleGroupsUniqueErr = "schedule_groups map entries must use distinct"
 	wantScheduleEcsParamsErr    = "ecs_parameters must be set"
+	wantPipeNameOverrideLenErr  = "pipes[*].name_override must be 1–64 characters"
+	wantSchedNameOverrideLenErr = "schedules[*].name_override must be 1–64 characters"
 )
+
+// Embedded scenario for name_override tests (avoids a separate scenarios/*.tfvars file).
+const scenarioPipeScheduleNameOverride = `# Pipe and schedule name_override: deployed AWS names must match overrides verbatim.
+pipes = [
+  {
+    name          = "logical-pipe-name"
+    name_override = "my-exact-aws-pipe-name"
+    source_arn    = "arn:aws:sqs:REGION_PLACEHOLDER:123456789012:review-plan-fake-sqs"
+    target_arn    = "arn:aws:sns:REGION_PLACEHOLDER:123456789012:review-plan-fake-sns"
+    create_role   = true
+  }
+]
+
+schedules = [
+  {
+    name                = "logical-schedule-name"
+    name_override       = "my-exact-aws-schedule-name"
+    schedule_expression = "rate(24 hours)"
+    target_arn          = "arn:aws:sns:REGION_PLACEHOLDER:123456789012:review-plan-fake-sns"
+    create_role         = true
+  }
+]
+`
+
+// scenarioPipeNameOverrideTooLong exercises the pipes[*].name_override length validation (65 chars > 64 limit).
+const scenarioPipeNameOverrideTooLong = `pipes = [
+  {
+    name          = "logical-pipe-name"
+    name_override = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    source_arn    = "arn:aws:sqs:REGION_PLACEHOLDER:123456789012:review-plan-fake-sqs"
+    target_arn    = "arn:aws:sns:REGION_PLACEHOLDER:123456789012:review-plan-fake-sns"
+    create_role   = true
+  }
+]
+`
+
+// scenarioScheduleNameOverrideTooLong exercises the schedules[*].name_override length validation (65 chars > 64 limit).
+const scenarioScheduleNameOverrideTooLong = `schedules = [
+  {
+    name                = "logical-schedule-name"
+    name_override       = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    schedule_expression = "rate(24 hours)"
+    target_arn          = "arn:aws:sns:REGION_PLACEHOLDER:123456789012:review-plan-fake-sns"
+    create_role         = true
+  }
+]
+`
 
 var (
 	eventBusPolicyForEachKeyRe = regexp.MustCompile(`module\.collection\.module\.event_bus_policy\["([a-f0-9]{64})"\]`)
@@ -58,6 +107,44 @@ func TestPlan_scheduleGroup_orphanGroupName_failsValidation(t *testing.T) {
 	_, err := terraform.InitAndPlanE(t, opts)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), wantScheduleGroupErr)
+}
+
+func TestPlan_pipe_nameOverride_usesProvidedName(t *testing.T) {
+	opts := planOptsFromEmbeddedScenario(t, scenarioPipeScheduleNameOverride)
+	plan := initPlanShowStructOrSkip(t, opts)
+
+	pipe := findPlannedResource(plan, "aws_pipes_pipe", `pipes_pipe["logical-pipe-name"]`)
+	require.NotNil(t, pipe, "expected aws_pipes_pipe for logical-pipe-name in plan")
+	name, ok := pipe.AttributeValues["name"].(string)
+	require.True(t, ok, "pipe name should be a string in planned values")
+	require.Equal(t, "my-exact-aws-pipe-name", name,
+		"name_override must be used as the deployed AWS pipe name verbatim, ignoring the Launch naming prefix")
+}
+
+func TestPlan_schedule_nameOverride_usesProvidedName(t *testing.T) {
+	opts := planOptsFromEmbeddedScenario(t, scenarioPipeScheduleNameOverride)
+	plan := initPlanShowStructOrSkip(t, opts)
+
+	sched := findPlannedResource(plan, "aws_scheduler_schedule", `scheduler_schedule["logical-schedule-name"]`)
+	require.NotNil(t, sched, "expected aws_scheduler_schedule for logical-schedule-name in plan")
+	name, ok := sched.AttributeValues["name"].(string)
+	require.True(t, ok, "schedule name should be a string in planned values")
+	require.Equal(t, "my-exact-aws-schedule-name", name,
+		"name_override must be used as the deployed AWS schedule name verbatim, ignoring the Launch naming prefix")
+}
+
+func TestPlan_pipe_nameOverrideTooLong_failsValidation(t *testing.T) {
+	opts := planOptsFromEmbeddedScenario(t, scenarioPipeNameOverrideTooLong)
+	_, err := terraform.InitAndPlanE(t, opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), wantPipeNameOverrideLenErr)
+}
+
+func TestPlan_schedule_nameOverrideTooLong_failsValidation(t *testing.T) {
+	opts := planOptsFromEmbeddedScenario(t, scenarioScheduleNameOverrideTooLong)
+	_, err := terraform.InitAndPlanE(t, opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), wantSchedNameOverrideLenErr)
 }
 
 func TestPlan_pipe_createRoleWithoutRoleArn_succeeds(t *testing.T) {
@@ -213,6 +300,31 @@ func planOpts(t *testing.T, scenarioFile string) *terraform.Options {
 		},
 	}
 	return opts
+}
+
+func planOptsFromEmbeddedScenario(t *testing.T, raw string) *terraform.Options {
+	t.Helper()
+	dir := fixtureDir(t)
+	region := resolvedAWSRegionForPlan()
+	out := strings.ReplaceAll(raw, "REGION_PLACEHOLDER", region)
+	dst := filepath.Join(t.TempDir(), "embedded_scenario.tfvars")
+	require.NoError(t, os.WriteFile(dst, []byte(out), 0o600))
+
+	return &terraform.Options{
+		TerraformDir: dir,
+		VarFiles:     []string{dst},
+		Vars: map[string]interface{}{
+			"aws_region": region,
+		},
+		NoColor: true,
+		Logger:  logger.Discard,
+		EnvVars: map[string]string{
+			"AWS_REGION":         region,
+			"AWS_DEFAULT_REGION": region,
+			"TF_IN_AUTOMATION":   "true",
+			"TF_INPUT":           "0",
+		},
+	}
 }
 
 // resolvedAWSRegionForPlan matches the functional test intent when credentials exist; otherwise falls back so

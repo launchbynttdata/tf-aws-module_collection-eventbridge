@@ -66,6 +66,16 @@ output "pipe_iam_role_names" {
   value       = { for k, m in module.iam_role_pipe : k => m.role_name }
 }
 
+output "pipe_execution_log_group_names" {
+  description = "CloudWatch log group names created for pipes with managed_execution_logging, keyed by logical pipe name."
+  value       = { for k, m in module.pipe_execution_log_group : k => m.log_group_name }
+}
+
+output "pipe_execution_log_group_arns" {
+  description = "CloudWatch log group ARNs created for pipes with managed_execution_logging, keyed by logical pipe name."
+  value       = { for k, m in module.pipe_execution_log_group : k => m.log_group_arn }
+}
+
 output "required_tag_keys" {
   description = "Echo of var.required_tag_keys after validation (for policy and composition)."
   value       = local.required_tag_keys_resolved

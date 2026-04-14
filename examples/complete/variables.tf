@@ -128,6 +128,7 @@ variable "schedule_groups" {
 variable "schedules" {
   type = list(object({
     name                         = string
+    name_override                = optional(string)
     group_name                   = optional(string)
     schedule_expression          = string
     schedule_expression_timezone = optional(string)
@@ -148,6 +149,7 @@ variable "schedules" {
 variable "pipes" {
   type = list(object({
     name                  = string
+    name_override         = optional(string)
     source_arn            = string
     source_parameters     = optional(any)
     filter_criteria       = optional(any)
@@ -184,4 +186,21 @@ variable "sqs_queue_name_prefix" {
   description = "Name prefix for the SQS queue used as a pipe source."
   type        = string
   default     = "eb-collection-pipe-src"
+}
+
+variable "pipe_managed_execution_logging" {
+  description = "Log level and CloudWatch retention for the example pipe when using managed_execution_logging (local.example_pipes)."
+  type = object({
+    level             = string
+    retention_in_days = number
+  })
+  default = {
+    level             = "INFO"
+    retention_in_days = 14
+  }
+
+  validation {
+    condition     = contains(["ERROR", "INFO", "TRACE"], var.pipe_managed_execution_logging.level)
+    error_message = "pipe_managed_execution_logging.level must be ERROR, INFO, or TRACE."
+  }
 }

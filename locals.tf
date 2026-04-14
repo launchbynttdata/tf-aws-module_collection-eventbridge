@@ -61,6 +61,11 @@ locals {
 
   pipes_by_name = { for p in var.pipes : p.name => p }
 
+  # var.pipes is any with heterogeneous shapes; use try() — tomap(v) fails when nested attribute types differ across pipes.
+  pipe_name_override_by_key      = { for k, v in local.pipes_by_name : k => try(v.name_override, null) }
+  pipe_enrichment_arn_by_key     = { for k, v in local.pipes_by_name : k => try(v.enrichment_arn, null) }
+  pipe_source_kms_key_arn_by_key = { for k, v in local.pipes_by_name : k => try(v.source_kms_key_arn, null) }
+
   api_destinations_by_key = {
     for i, a in var.api_destinations : "${a.connection_name}:${a.destination_name}" => merge(a, { _index = i })
   }
@@ -153,25 +158,29 @@ locals {
   }
 
   pipes_pipe_full_names = {
-    for k, _ in local.pipes_by_name : k => (
-      length("${module.resource_names["pipe"].standard}-${k}") <= 64 ?
-      "${module.resource_names["pipe"].standard}-${k}" :
-      (
-        64 - length(k) - 1 >= 1 ?
-        "${substr(module.resource_names["pipe"].standard, 0, 64 - length(k) - 1)}-${k}" :
-        substr(sha256("${module.resource_names["pipe"].standard}-${k}"), 0, 64)
+    for k, v in local.pipes_by_name : k => (
+      local.pipe_name_override_by_key[k] != null && local.pipe_name_override_by_key[k] != "" ? local.pipe_name_override_by_key[k] : (
+        length("${module.resource_names["pipe"].standard}-${k}") <= 64 ?
+        "${module.resource_names["pipe"].standard}-${k}" :
+        (
+          64 - length(k) - 1 >= 1 ?
+          "${substr(module.resource_names["pipe"].standard, 0, 64 - length(k) - 1)}-${k}" :
+          substr(sha256("${module.resource_names["pipe"].standard}-${k}"), 0, 64)
+        )
       )
     )
   }
 
   scheduler_schedule_full_names = {
-    for k, _ in local.schedules_by_name : k => (
-      length("${module.resource_names["schedule"].standard}-${k}") <= 64 ?
-      "${module.resource_names["schedule"].standard}-${k}" :
-      (
-        64 - length(k) - 1 >= 1 ?
-        "${substr(module.resource_names["schedule"].standard, 0, 64 - length(k) - 1)}-${k}" :
-        substr(sha256("${module.resource_names["schedule"].standard}-${k}"), 0, 64)
+    for k, v in local.schedules_by_name : k => (
+      try(v.name_override, null) != null && v.name_override != "" ? v.name_override : (
+        length("${module.resource_names["schedule"].standard}-${k}") <= 64 ?
+        "${module.resource_names["schedule"].standard}-${k}" :
+        (
+          64 - length(k) - 1 >= 1 ?
+          "${substr(module.resource_names["schedule"].standard, 0, 64 - length(k) - 1)}-${k}" :
+          substr(sha256("${module.resource_names["schedule"].standard}-${k}"), 0, 64)
+        )
       )
     )
   }
@@ -202,6 +211,37 @@ locals {
   pipes_needing_role = {
     for k, v in local.pipes_by_name : k => v
     if coalesce(v.create_role, false)
+  }
+
+  # Managed CloudWatch log group for pipe execution logs (optional per pipe).
+  pipes_with_managed_execution_logging = {
+    for k, v in local.pipes_by_name : k => {
+      pipe           = v
+      log_group_name = trimspace(try(v.managed_execution_logging.name_override, "")) != "" ? trimspace(v.managed_execution_logging.name_override) : "/aws/vendedlogs/pipes/${local.pipes_pipe_full_names[k]}"
+    }
+    if try(v.managed_execution_logging, null) != null
+  }
+
+  pipe_execution_logs_kms_key_arn = {
+    for k, v in local.pipes_by_name : k =>
+    try(coalesce(nullif(try(v.execution_logs_kms_key_arn, ""), ""), nullif(try(v.managed_execution_logging.kms_key_id, ""), "")), null)
+  }
+
+  pipe_effective_log_configuration = {
+    for k, v in local.pipes_by_name : k => (
+      try(v.managed_execution_logging, null) != null ? {
+        level                           = coalesce(try(v.managed_execution_logging.level, null), try(v.log_configuration.level, null), "INFO")
+        include_execution_data          = try(coalesce(try(v.managed_execution_logging.include_execution_data, null), try(v.log_configuration.include_execution_data, null)), null)
+        cloudwatch_logs_log_destination = { log_group_arn = module.pipe_execution_log_group[k].log_group_arn }
+        firehose_log_destination        = try(v.log_configuration.firehose_log_destination, null)
+        s3_log_destination              = try(v.log_configuration.s3_log_destination, null)
+      } : try(v.log_configuration, null)
+    )
+  }
+
+  pipe_log_active = {
+    for k, v in local.pipes_by_name : k =>
+    local.pipe_effective_log_configuration[k] != null && try(local.pipe_effective_log_configuration[k].level, "OFF") != "OFF"
   }
 
   event_target_policy_statements = {
@@ -264,17 +304,17 @@ locals {
 
   pipe_enrichment_actions = {
     for k, v in local.pipes_needing_role : k => compact(concat(
-      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
-        startswith(v.enrichment_arn, "arn:aws:lambda:") ? ["lambda:InvokeFunction"] : []
+      local.pipe_enrichment_arn_by_key[k] == null || local.pipe_enrichment_arn_by_key[k] == "" ? [] : (
+        startswith(local.pipe_enrichment_arn_by_key[k], "arn:aws:lambda:") ? ["lambda:InvokeFunction"] : []
       ),
-      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
-        startswith(v.enrichment_arn, "arn:aws:execute-api:") ? ["execute-api:Invoke"] : []
+      local.pipe_enrichment_arn_by_key[k] == null || local.pipe_enrichment_arn_by_key[k] == "" ? [] : (
+        startswith(local.pipe_enrichment_arn_by_key[k], "arn:aws:execute-api:") ? ["execute-api:Invoke"] : []
       ),
-      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
-        can(regex("^arn:aws:events:[^:]+:[^:]+:api-destination/", v.enrichment_arn)) ? ["events:InvokeApiDestination"] : []
+      local.pipe_enrichment_arn_by_key[k] == null || local.pipe_enrichment_arn_by_key[k] == "" ? [] : (
+        can(regex("^arn:aws:events:[^:]+:[^:]+:api-destination/", local.pipe_enrichment_arn_by_key[k])) ? ["events:InvokeApiDestination"] : []
       ),
-      try(v.enrichment_arn, null) == null || try(v.enrichment_arn, null) == "" ? [] : (
-        startswith(v.enrichment_arn, "arn:aws:states:") ? ["states:StartSyncExecution", "states:StartExecution"] : []
+      local.pipe_enrichment_arn_by_key[k] == null || local.pipe_enrichment_arn_by_key[k] == "" ? [] : (
+        startswith(local.pipe_enrichment_arn_by_key[k], "arn:aws:states:") ? ["states:StartSyncExecution", "states:StartExecution"] : []
       ),
     ))
   }
@@ -306,18 +346,46 @@ locals {
           resources = [v.target_arn]
         }
       },
-      try(v.enrichment_arn, null) != null && v.enrichment_arn != "" && length(local.pipe_enrichment_actions[k]) > 0 ? {
+      local.pipe_enrichment_arn_by_key[k] != null && local.pipe_enrichment_arn_by_key[k] != "" && length(local.pipe_enrichment_actions[k]) > 0 ? {
         PipeInvokeEnrichment = {
           sid       = "PipeInvokeEnrichment"
           actions   = local.pipe_enrichment_actions[k]
-          resources = [v.enrichment_arn]
+          resources = [local.pipe_enrichment_arn_by_key[k]]
         }
       } : {},
-      try(v.source_kms_key_arn, null) != null && v.source_kms_key_arn != "" ? {
+      local.pipe_source_kms_key_arn_by_key[k] != null && local.pipe_source_kms_key_arn_by_key[k] != "" ? {
         PipeKmsDecryptSource = {
           sid       = "PipeKmsDecryptSource"
           actions   = ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey"]
-          resources = [v.source_kms_key_arn]
+          resources = [local.pipe_source_kms_key_arn_by_key[k]]
+        }
+      } : {},
+      local.pipe_log_active[k] && try(local.pipe_effective_log_configuration[k].cloudwatch_logs_log_destination.log_group_arn, null) != null ? {
+        PipeCloudWatchLogs = {
+          sid       = "PipeCloudWatchLogs"
+          actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+          resources = ["${local.pipe_effective_log_configuration[k].cloudwatch_logs_log_destination.log_group_arn}:*"]
+        }
+      } : {},
+      local.pipe_log_active[k] && try(local.pipe_effective_log_configuration[k].firehose_log_destination.delivery_stream_arn, null) != null ? {
+        PipeFirehoseLogs = {
+          sid       = "PipeFirehoseLogs"
+          actions   = ["firehose:PutRecord", "firehose:PutRecordBatch"]
+          resources = [local.pipe_effective_log_configuration[k].firehose_log_destination.delivery_stream_arn]
+        }
+      } : {},
+      local.pipe_log_active[k] && try(local.pipe_effective_log_configuration[k].s3_log_destination.bucket_name, null) != null ? {
+        PipeS3Logs = {
+          sid       = "PipeS3Logs"
+          actions   = ["s3:PutObject"]
+          resources = ["arn:aws:s3:::${local.pipe_effective_log_configuration[k].s3_log_destination.bucket_name}/*"]
+        }
+      } : {},
+      local.pipe_log_active[k] && local.pipe_execution_logs_kms_key_arn[k] != null ? {
+        PipeKmsExecutionLogs = {
+          sid       = "PipeKmsExecutionLogs"
+          actions   = ["kms:Decrypt", "kms:DescribeKey", "kms:GenerateDataKey"]
+          resources = [local.pipe_execution_logs_kms_key_arn[k]]
         }
       } : {},
     )
